@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Memuat Player...</title>
+    <title>Player</title>
     <meta name="theme-color" content="#000000">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -19,11 +19,9 @@
 
     <nav class="fixed top-0 w-full bg-black/60 backdrop-blur z-50 h-14 flex items-center px-4 justify-between">
         <a href="/" class="text-white flex items-center gap-2 hover:text-red-500 transition">
-            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Beranda</span>
+            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Kembali</span>
         </a>
-        <div class="flex items-center gap-3">
-            <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden"></select>
-        </div>
+        <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden"></select>
     </nav>
 
     <main class="flex-1 flex flex-col items-center pt-14 pb-10 w-full">
@@ -31,206 +29,120 @@
             
             <div class="w-full bg-black relative group aspect-vertical rounded-xl overflow-hidden ring-1 ring-zinc-800 shadow-2xl mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer" preload="auto"></video>
-                
                 <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
-                    <div class="text-center">
-                        <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i>
-                        <p class="text-xs text-gray-500">Sedang memuat video...</p>
-                    </div>
+                    <div class="text-center"><i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i><p class="text-xs text-gray-500">Memuat...</p></div>
                 </div>
             </div>
 
-            <div id="info-container" class="mt-5 px-4 sm:px-0 hidden">
+            <div class="mt-5 px-4 sm:px-0">
                 <div class="flex justify-between items-start gap-2">
-                    <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">Judul Drama</h1>
-                    <button id="fav-btn" class="text-gray-500 hover:text-red-500 transition p-2"><i class="far fa-heart text-xl"></i></button>
+                    <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">...</h1>
+                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-500 text-xl"><i class="far fa-heart"></i></button>
                 </div>
 
                 <div class="flex items-center mt-4 gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800">
-                    <a id="btn-prev" class="flex-1 py-2.5 bg-zinc-800 rounded-lg text-center text-xs font-bold text-gray-400 hover:text-white transition flex items-center justify-center gap-2 disabled:opacity-50"><i class="fas fa-step-backward"></i> Prev</a>
-                    <div class="text-center px-2">
-                        <span class="text-[10px] text-gray-500 block">EPISODE</span>
-                        <span id="ep-idx" class="text-white text-lg font-bold leading-none">-</span>
-                    </div>
-                    <a id="btn-next" class="flex-[2] py-2.5 bg-red-600 rounded-lg text-center text-sm font-bold text-white shadow-lg shadow-red-900/30 hover:bg-red-700 transition flex items-center justify-center gap-2">Lanjut <i class="fas fa-step-forward"></i></a>
+                    <a id="btn-prev" class="flex-1 py-2.5 bg-zinc-800 rounded-lg text-center text-xs font-bold text-gray-400 disabled:opacity-50"><i class="fas fa-step-backward"></i> Prev</a>
+                    <div class="text-center px-2"><span class="text-[10px] text-gray-500 block">EPISODE</span><span id="ep-idx" class="text-white text-lg font-bold leading-none">-</span></div>
+                    <a id="btn-next" class="flex-[2] py-2.5 bg-red-600 rounded-lg text-center text-sm font-bold text-white">Lanjut <i class="fas fa-step-forward"></i></a>
                 </div>
 
                 <div class="mt-4 p-4 bg-zinc-900 rounded-xl border border-zinc-800/50">
-                    <div id="tags" class="flex flex-wrap gap-2 mb-2"></div>
-                    <p id="desc" class="text-sm text-gray-400 leading-relaxed line-clamp-3 cursor-pointer transition" onclick="this.classList.toggle('line-clamp-3'); this.classList.toggle('expanded')"></p>
-                    <div class="text-center mt-2"><i class="fas fa-chevron-down text-xs text-zinc-600"></i></div>
+                    <p id="desc" class="text-sm text-gray-400 leading-relaxed line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')"></p>
                 </div>
 
                 <div class="mt-6">
-                    <h3 class="text-xs uppercase text-gray-500 font-bold mb-3 flex items-center gap-2">
-                        <i class="fas fa-list"></i> Daftar Episode
-                    </h3>
-                    <div id="ep-grid" class="grid grid-cols-5 sm:grid-cols-8 gap-2 max-h-60 overflow-y-auto hide-scroll pr-1"></div>
-                </div>
-
-                 <div class="mt-8 pt-6 border-t border-zinc-800 hidden" id="related-sec">
-                    <h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Mungkin Anda Suka</h3>
-                    <div id="related-grid" class="grid grid-cols-3 gap-3"></div>
+                    <h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Daftar Episode</h3>
+                    <div id="ep-grid" class="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto hide-scroll pr-1"></div>
                 </div>
             </div>
         </div>
     </main>
 
     <script>
-        // --- LOGIKA UTAMA: PARSING URL ---
-        // URL: https://domain.com/player/41000103145/1
+        const API = "/api/data";
         const pathParts = window.location.pathname.split('/'); 
-        // Hasil split: ["", "player", "41000103145", "1"]
-        
-        const BOOK_ID = pathParts[2];
-        const EP_INDEX = parseInt(pathParts[3]) || 1;
-        const API_BASE = "/api/data";
+        const bookId = pathParts[2]; 
+        const epIndex = parseInt(pathParts[3]) || 1;
 
-        // Init Shell
-        if (!BOOK_ID) {
-            alert("ID Drama tidak ditemukan di URL");
-            window.location.href = "/";
-        } else {
-            loadData();
-        }
+        const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
+        const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+        let currentInfo = null;
 
-        async function loadData() {
+        async function init() {
+            if(!bookId) return;
             try {
-                // 1. Panggil API
-                const res = await fetch(`${API_BASE}?type=chapter&bookId=${BOOK_ID}`);
+                const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
                 const json = await res.json();
-
-                if (json.error) throw new Error(json.error);
-
-                // 2. Olah Data
-                const chapters = json.chapters || [];
-                const currentChap = chapters.find(c => c.index === EP_INDEX) || chapters[0];
-                const info = json.info || {};
-
-                if (!currentChap) throw new Error("Episode tidak ditemukan");
-
-                // 3. Render ke Layar
-                renderPlayer(info, currentChap, chapters, json.related);
+                if(json.error) throw new Error(json.error);
                 
-                // 4. Simpan History
-                saveHistory(BOOK_ID, info, currentChap.index);
+                const chapters = json.chapters || [];
+                const currentChap = chapters.find(c => c.index === epIndex) || chapters[0];
+                currentInfo = json.info || {};
 
-            } catch (e) {
-                document.getElementById('loader').innerHTML = `
-                    <div class="text-center text-red-500 px-4">
-                        <i class="fas fa-exclamation-triangle text-3xl mb-2"></i>
-                        <p class="text-sm font-bold">Gagal Memuat</p>
-                        <p class="text-xs mt-1 text-gray-400">${e.message}</p>
-                        <a href="/" class="mt-4 inline-block bg-zinc-800 px-4 py-2 rounded text-xs text-white">Kembali</a>
-                    </div>`;
+                // Save History
+                const hist = getLS('db_history');
+                hist[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps, lastEpisode: epIndex, timestamp: Date.now() };
+                setLS('db_history', hist);
+
+                renderUI(json, currentChap, chapters);
+            } catch(e) {
+                document.getElementById('loader').innerHTML = `<div class="text-red-500 text-center">${e.message}</div>`;
             }
         }
 
-        function renderPlayer(info, currentChap, chapters, related) {
+        function renderUI(data, currentChap, chapters) {
             const vid = document.getElementById('video-el');
             const qSelect = document.getElementById('quality-select');
-            const loader = document.getElementById('loader');
-
-            // Setup Video & Quality
-            if (currentChap.sources && Array.isArray(currentChap.sources)) {
+            
+            // Video
+            if(currentChap.sources && currentChap.sources.length) {
                 qSelect.classList.remove('hidden');
                 qSelect.innerHTML = currentChap.sources.map(s => `<option value="${s.url}">${s.q}p</option>`).join('');
                 vid.src = currentChap.sources[0].url;
-                
-                qSelect.onchange = (e) => {
-                    const t = vid.currentTime;
-                    vid.src = e.target.value;
-                    vid.currentTime = t;
-                    vid.play();
-                };
+                qSelect.onchange = (e) => { const t=vid.currentTime; vid.src=e.target.value; vid.currentTime=t; vid.play(); }
             } else {
                 vid.src = currentChap.url;
             }
-
-            vid.poster = info.cover;
-            
-            // Event Video
-            vid.oncanplay = () => loader.classList.add('hidden');
-            vid.onwaiting = () => loader.classList.remove('hidden');
-            vid.onerror = () => { loader.innerHTML = '<div class="text-red-500 text-xs">Video Error.</div>'; };
+            vid.poster = data.info.cover;
+            vid.oncanplay = () => document.getElementById('loader').classList.add('hidden');
             vid.onended = () => {
-                if (EP_INDEX < chapters.length) window.location.href = `/player/${BOOK_ID}/${EP_INDEX + 1}`;
+                if(epIndex < chapters.length) window.location.href = `/player/${bookId}/${epIndex+1}`;
             };
 
-            // Setup Info UI
-            document.getElementById('info-container').classList.remove('hidden');
-            document.getElementById('title').innerText = info.title;
-            document.getElementById('desc').innerText = info.desc || 'Tidak ada deskripsi.';
+            // Info
+            document.getElementById('title').innerText = data.info.title;
+            document.getElementById('desc').innerText = data.info.desc;
             document.getElementById('ep-idx').innerText = currentChap.index;
-            document.title = `Nonton ${info.title} Eps ${currentChap.index}`;
 
-            // Tags
-            const tagsEl = document.getElementById('tags');
-            if(info.tags) tagsEl.innerHTML = info.tags.map(t => `<span class="bg-zinc-800 text-[10px] px-2 py-0.5 rounded text-gray-400 border border-zinc-700">${t}</span>`).join('');
-
-            // Navigasi Prev/Next (Link Biasa)
+            // Nav Buttons
             const prev = document.getElementById('btn-prev');
             const next = document.getElementById('btn-next');
-            
-            if (EP_INDEX > 1) prev.href = `/player/${BOOK_ID}/${EP_INDEX - 1}`;
-            else { prev.removeAttribute('href'); prev.classList.add('opacity-50', 'cursor-not-allowed'); }
-            
-            if (EP_INDEX < chapters.length) next.href = `/player/${BOOK_ID}/${EP_INDEX + 1}`;
-            else { next.removeAttribute('href'); next.classList.add('opacity-50', 'cursor-not-allowed'); }
+            if(epIndex > 1) prev.href = `/player/${bookId}/${epIndex-1}`; else prev.classList.add('opacity-50','pointer-events-none');
+            if(epIndex < chapters.length) next.href = `/player/${bookId}/${epIndex+1}`; else next.classList.add('opacity-50','pointer-events-none');
 
-            // Grid Episode
-            const grid = document.getElementById('ep-grid');
-            grid.innerHTML = chapters.map(ch => `
-                <a href="/player/${BOOK_ID}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===EP_INDEX ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400 hover:bg-zinc-700'}">
-                    ${ch.index}
-                </a>
-            `).join('');
+            // Grid
+            document.getElementById('ep-grid').innerHTML = chapters.map(ch => 
+                `<a href="/player/${bookId}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===epIndex ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>`
+            ).join('');
             
-            // Scroll ke episode aktif
-            setTimeout(() => {
-                const activeBtn = grid.querySelector('.bg-red-600');
-                if(activeBtn) activeBtn.scrollIntoView({block: 'center', behavior: 'smooth'});
-            }, 500);
-
-            // Related
-            if(related && related.length > 0) {
-                document.getElementById('related-sec').classList.remove('hidden');
-                document.getElementById('related-grid').innerHTML = related.slice(0,6).map(b => `
-                    <a href="/player/${b.id}/1" class="block group">
-                        <div class="aspect-[2/3] bg-zinc-800 rounded overflow-hidden mb-1 relative"><img src="${b.cover}" class="w-full h-full object-cover"></div>
-                        <div class="text-[10px] text-gray-400 line-clamp-1 group-hover:text-white">${b.title}</div>
-                    </a>
-                `).join('');
-            }
-
-            // Favorit
-            updateFavBtn(info);
+            updateFavBtn();
         }
 
-        // LocalStorage Helpers
-        function getLS(k) { return JSON.parse(localStorage.getItem(k) || '{}'); }
-        function setLS(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
-
-        function saveHistory(id, info, ep) {
-            const hist = getLS('db_history');
-            hist[id] = { id, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: ep, timestamp: Date.now() };
-            setLS('db_history', hist);
-        }
-
-        function updateFavBtn(info) {
-            const btn = document.getElementById('fav-btn');
+        function toggleFav() {
             const favs = getLS('db_favs');
-            const isFav = !!favs[BOOK_ID];
-            
-            btn.innerHTML = isFav ? '<i class="fas fa-heart text-red-600 text-xl"></i>' : '<i class="far fa-heart text-xl"></i>';
-            
-            btn.onclick = () => {
-                if(isFav) delete favs[BOOK_ID];
-                else favs[BOOK_ID] = { id: BOOK_ID, title: info.title, cover: info.cover, episodes: info.totalEps };
-                setLS('db_favs', favs);
-                updateFavBtn(info); // Refresh icon
-            };
+            if(favs[bookId]) delete favs[bookId];
+            else favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
+            setLS('db_favs', favs);
+            updateFavBtn();
         }
+
+        function updateFavBtn() {
+            const favs = getLS('db_favs');
+            const btn = document.getElementById('fav-btn');
+            btn.innerHTML = favs[bookId] ? '<i class="fas fa-heart text-red-600"></i>' : '<i class="far fa-heart"></i>';
+        }
+
+        init();
     </script>
 </body>
 </html>
