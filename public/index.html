@@ -13,8 +13,8 @@
         .aspect-poster { aspect-ratio: 2/3; }
         .glass-nav { background: rgba(0, 0, 0, 0.95); border-bottom: 1px solid rgba(255,255,255,0.05); }
         .glass-bottom { background: rgba(0, 0, 0, 0.95); border-top: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-        /* Animasi Skeleton yang lebih halus */
         .skeleton { background: linear-gradient(90deg, #1f1f1f 25%, #2a2a2a 50%, #1f1f1f 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     </style>
@@ -51,32 +51,36 @@
         let currentTab = 'home';
         let homeData = null;
 
+        // Utils LocalStorage
         const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
 
+        // Fungsi Ganti Tab
         function switchTab(tab) {
             currentTab = tab;
-            document.querySelectorAll('.nav-btn').forEach(b => b.className = `nav-btn w-16 ${b.id===`tab-${tab}` ? 'text-red-500' : 'text-gray-500'}`);
+            document.querySelectorAll('.nav-btn').forEach(b => {
+                const isActive = b.id === `tab-${tab}`;
+                b.className = `nav-btn w-16 ${isActive ? 'text-red-500' : 'text-gray-500'}`;
+            });
             render();
         }
 
+        // Fungsi Render Halaman
         async function render() {
             const app = document.getElementById('app');
+            app.innerHTML = '';
             
             // --- TAB BERANDA ---
             if(currentTab === 'home') {
-                // Jika data belum ada, tampilkan Skeleton & Fetch Data
+                // Jika data belum ada, ambil dulu (Fetch)
                 if(!homeData) {
+                    // Tampilkan Skeleton Loading
                     app.innerHTML = `
-                        <div class="space-y-8 animate-pulse">
-                            <div class="space-y-4">
-                                <div class="h-6 w-40 bg-zinc-800 rounded"></div>
-                                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-                                    <div class="aspect-poster bg-zinc-800 rounded-lg"></div>
-                                    <div class="aspect-poster bg-zinc-800 rounded-lg"></div>
-                                    <div class="aspect-poster bg-zinc-800 rounded-lg"></div>
-                                    <div class="aspect-poster bg-zinc-800 rounded-lg"></div>
-                                    <div class="aspect-poster bg-zinc-800 rounded-lg"></div>
-                                </div>
+                        <div class="space-y-6 pt-4">
+                            <div class="h-6 w-32 bg-zinc-800 rounded skeleton"></div>
+                            <div class="grid grid-cols-3 gap-3">
+                                <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
+                                <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
+                                <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
                             </div>
                         </div>`;
                     
@@ -84,7 +88,7 @@
                         const res = await fetch(`${API}?type=list`);
                         const json = await res.json();
                         homeData = json.sections;
-                        render(); // <--- INI PERBAIKANNYA: Render ulang setelah data didapat!
+                        render(); // <--- PENTING: Render ulang setelah data didapat!
                     } catch(e) { 
                         app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat data. Cek koneksi.</div>'; 
                     }
@@ -92,7 +96,6 @@
                 }
                 
                 // Jika data sudah ada, Tampilkan!
-                app.innerHTML = ''; // Bersihkan skeleton
                 if(homeData && homeData.length) {
                     homeData.forEach(sec => {
                         if(!sec.books.length) return;
@@ -109,9 +112,8 @@
                 }
             } 
             
-            // --- TAB LAINNYA (Sama seperti sebelumnya) ---
+            // --- TAB FAVORIT & RIWAYAT ---
             else if(currentTab === 'favorites' || currentTab === 'history') {
-                app.innerHTML = '';
                 const key = currentTab === 'favorites' ? 'db_favs' : 'db_history';
                 const data = Object.values(getLS(key)).sort((a,b) => b.timestamp - a.timestamp);
                 app.innerHTML = `<h2 class="text-xl font-bold text-white mb-6 capitalize">${currentTab === 'favorites' ? 'Favorit Saya' : 'Riwayat Tontonan'}</h2>`;
@@ -127,6 +129,7 @@
                     app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
                 }
             }
+            // --- TAB AKUN ---
             else {
                 app.innerHTML = `
                     <div class="text-center py-20 text-gray-400 animate-fade-in">
@@ -140,11 +143,12 @@
             }
         }
 
+        // FUNGSI MEMBUAT KARTU (LINK NORMAL)
         function createCard(b, isHistory=false) {
-            // URL Redirect ke Player
             let url = `/player/${b.id}/1`;
             if(isHistory && b.lastEpisode) url = `/player/${b.id}/${b.lastEpisode}`;
             
+            // PERHATIKAN: Tidak ada onclick="navigate(...)". Ini link biasa.
             return `
             <a href="${url}" class="block group relative transition transform active:scale-95">
                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
@@ -156,6 +160,7 @@
             </a>`;
         }
 
+        // Search
         document.getElementById('search-input').addEventListener('keypress', async (e) => {
             if(e.key === 'Enter') {
                 const q = e.target.value;
@@ -170,7 +175,7 @@
             }
         });
 
-        // Jalankan Render Awal
+        // Render Awal
         render();
     </script>
 </body>
