@@ -13,22 +13,22 @@
         .hide-scroll::-webkit-scrollbar { display: none; }
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .aspect-poster { aspect-ratio: 2/3; }
-        .aspect-vertical-video { aspect-ratio: 9/16; }
+        /* Rasio Player 9:16 tapi max-height dibatasi agar pas di layar */
+        .aspect-vertical-video { aspect-ratio: 9/16; max-height: 80vh; }
         .glass-nav { background: rgba(0, 0, 0, 0.95); border-bottom: 1px solid rgba(255,255,255,0.05); }
         .glass-bottom { background: rgba(0, 0, 0, 0.95); border-top: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
         .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
         .expanded { -webkit-line-clamp: unset; }
         
-        /* Animasi Loading Skeleton */
+        /* Loading Animation */
         .skeleton { background: linear-gradient(90deg, #1f1f1f 25%, #2a2a2a 50%, #1f1f1f 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
     </style>
     <script type="application/ld+json" id="seo-schema">{}</script>
 </head>
-<body class="min-h-screen flex flex-col pb-20">
-
-    <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 transition-all duration-300" id="navbar">
+<body class="min-h-screen flex flex-col pb-24"> <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 transition-all duration-300" id="navbar">
         <div id="nav-left" class="flex items-center">
             <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
                 <i class="fas fa-play-circle text-2xl drop-shadow-md"></i>
@@ -47,31 +47,31 @@
 
     <nav class="fixed bottom-0 w-full glass-bottom z-50 h-16 pb-safe">
         <div class="max-w-lg mx-auto h-full flex justify-around items-center px-2">
-            <button onclick="switchTab('home')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-red-500" id="tab-home">
-                <i class="fas fa-home text-xl mb-0.5 transition group-active:scale-90"></i>
+            <button onclick="switchTab('home')" class="nav-btn group flex flex-col items-center justify-center w-16 h-full text-red-500" id="tab-home">
+                <i class="fas fa-home text-xl mb-1 transition-transform group-active:scale-90"></i>
                 <span class="text-[10px] font-medium">Beranda</span>
             </button>
             
-            <button onclick="switchTab('favorites')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-favorites">
-                <i class="fas fa-heart text-xl mb-0.5 transition group-active:scale-90"></i>
+            <button onclick="switchTab('favorites')" class="nav-btn group flex flex-col items-center justify-center w-16 h-full text-gray-500 hover:text-gray-300" id="tab-favorites">
+                <i class="fas fa-heart text-xl mb-1 transition-transform group-active:scale-90"></i>
                 <span class="text-[10px] font-medium">Favorit</span>
             </button>
 
-            <button onclick="switchTab('history')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-history">
-                <i class="fas fa-clock-rotate-left text-xl mb-0.5 transition group-active:scale-90"></i>
+            <button onclick="switchTab('history')" class="nav-btn group flex flex-col items-center justify-center w-16 h-full text-gray-500 hover:text-gray-300" id="tab-history">
+                <i class="fas fa-clock-rotate-left text-xl mb-1 transition-transform group-active:scale-90"></i>
                 <span class="text-[10px] font-medium">Riwayat</span>
             </button>
 
-            <button onclick="switchTab('account')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-account">
-                <i class="fas fa-user text-xl mb-0.5 transition group-active:scale-90"></i>
+            <button onclick="switchTab('account')" class="nav-btn group flex flex-col items-center justify-center w-16 h-full text-gray-500 hover:text-gray-300" id="tab-account">
+                <i class="fas fa-user text-xl mb-1 transition-transform group-active:scale-90"></i>
                 <span class="text-[10px] font-medium">Akun</span>
             </button>
         </div>
     </nav>
 
     <template id="tpl-home">
-        <div id="home-container" class="space-y-8 animate-fade-in pb-20">
-            <div id="home-skeleton" class="space-y-6">
+        <div id="home-container" class="space-y-8 animate-fade-in">
+            <div class="space-y-6">
                 <div class="h-6 w-32 bg-zinc-800 rounded skeleton"></div>
                 <div class="grid grid-cols-3 gap-3">
                     <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
@@ -83,9 +83,9 @@
     </template>
 
     <template id="tpl-grid-item">
-        <a href="" onclick="navigate(event, this.href)" class="group relative block cursor-pointer transition-transform active:scale-95">
+        <a href="" onclick="navigate(event, this.href)" class="item-link group relative block cursor-pointer transition-transform active:scale-95">
             <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition relative">
-                <img src="" class="w-full h-full object-cover transition duration-500 group-hover:scale-110" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
+                <img src="" class="item-img w-full h-full object-cover transition duration-500 group-hover:scale-110" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
                 <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow flex items-center gap-1">
                     <i class="fas fa-layer-group text-[8px] text-red-500"></i> <span class="ep-count"></span>
                 </div>
@@ -103,7 +103,7 @@
     </template>
 
     <template id="tpl-player">
-        <div class="flex flex-col gap-5 max-w-xl mx-auto pb-10">
+        <div class="flex flex-col gap-5 max-w-2xl mx-auto pb-4">
             
             <div class="w-full bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-zinc-800 relative group aspect-vertical-video mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
@@ -170,14 +170,10 @@
                 <i class="fas fa-user-astronaut text-4xl text-gray-400"></i>
             </div>
             <h2 class="text-xl font-bold text-white mb-2">Pengguna Tamu</h2>
-            <p class="text-gray-500 text-sm max-w-xs mx-auto mb-6">Simpan progres nontonmu di perangkat ini secara otomatis.</p>
+            <p class="text-gray-500 text-sm max-w-xs mx-auto mb-6">Riwayat tontonan tersimpan otomatis di perangkat ini.</p>
             
             <div class="w-full max-w-sm space-y-3">
-                <button onclick="alert('Fitur akan segera hadir!')" class="w-full py-3 bg-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-700 transition flex items-center justify-between px-4">
-                    <span><i class="fas fa-cog mr-2 text-gray-400"></i> Pengaturan</span>
-                    <i class="fas fa-chevron-right text-xs text-gray-600"></i>
-                </button>
-                 <button onclick="localStorage.clear(); location.reload()" class="w-full py-3 bg-red-900/20 text-red-500 border border-red-900/30 rounded-lg text-sm font-medium hover:bg-red-900/30 transition">
+                 <button onclick="if(confirm('Hapus semua riwayat?')) { localStorage.clear(); location.reload(); }" class="w-full py-3 bg-red-900/20 text-red-500 border border-red-900/30 rounded-lg text-sm font-medium hover:bg-red-900/30 transition">
                     <i class="fas fa-trash-alt mr-2"></i> Hapus Data Riwayat
                 </button>
             </div>
@@ -195,17 +191,13 @@
     <script>
         const API_BASE = "/api/data";
         
-        // STATE MANAGEMENT (MEMORY)
-        // Kita simpan data list di memory agar saat bolak-balik tab tidak fetch ulang (Cepat!)
         let store = {
             homeData: null,
             currentBook: null,
             currentTab: 'home'
         };
 
-        // LOCAL STORAGE HELPERS
         const LS_KEYS = { HISTORY: 'db_history', FAVS: 'db_favs' };
-        
         const getLS = (key) => JSON.parse(localStorage.getItem(key) || '{}');
         const setLS = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
@@ -213,16 +205,16 @@
         async function router() {
             const path = window.location.pathname;
             
-            // Handle Player Route: /player/BOOKID/CHAPTER
+            // Player Route
             const playerMatch = path.match(/^\/player\/(\d+)\/(\d+)$/);
             if (playerMatch) {
-                updateNavbar('back'); // Tampilkan tombol back
-                updateBottomNav(null); // Hide active bottom nav
+                updateNavbar('back');
+                updateBottomNav(null); 
                 await renderPlayer(playerMatch[1], parseInt(playerMatch[2]));
                 return;
             }
 
-            // Handle Tabs (Default Home)
+            // Tabs
             updateNavbar('home');
             updateBottomNav(store.currentTab);
 
@@ -242,7 +234,6 @@
 
         window.switchTab = (tabName) => {
             store.currentTab = tabName;
-            // Jika di player, kembali ke root URL
             if (window.location.pathname.includes('/player/')) {
                 history.pushState({}, "", "/");
             }
@@ -251,7 +242,6 @@
 
         window.onpopstate = router;
 
-        // --- UI UPDATERS ---
         function updateNavbar(mode) {
             const navLeft = document.getElementById('nav-left');
             const search = document.getElementById('search-container');
@@ -261,7 +251,7 @@
                     <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-gray-300 hover:text-white transition py-2">
                         <i class="fas fa-arrow-left text-lg"></i> <span class="font-bold text-sm">Kembali</span>
                     </a>`;
-                search.classList.add('hidden'); // Sembunyikan search di player agar bersih
+                search.classList.add('hidden');
             } else {
                 navLeft.innerHTML = `
                     <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-red-600 transition">
@@ -277,26 +267,19 @@
                 btn.classList.remove('text-red-500', 'text-gray-500');
                 if (btn.id === `tab-${activeTab}`) {
                     btn.classList.add('text-red-500');
-                    btn.querySelector('i').classList.add('mb-1'); // Efek naik dikit
+                    btn.querySelector('i').classList.add('mb-1'); 
                 } else {
                     btn.classList.add('text-gray-500');
                 }
             });
         }
 
-        // --- PAGE RENDERING ---
+        // --- PAGES ---
 
-        // 1. HOME
         async function renderHome() {
             const app = document.getElementById('app');
-            
-            // Gunakan Cache Memory jika ada (Super Cepat)
-            if (store.homeData) {
-                renderHomeContent(store.homeData);
-                return;
-            }
+            if (store.homeData) { renderHomeContent(store.homeData); return; }
 
-            // Show Skeleton
             const tpl = document.getElementById('tpl-home').content.cloneNode(true);
             app.innerHTML = '';
             app.appendChild(tpl);
@@ -307,21 +290,21 @@
                 store.homeData = json.sections || [];
                 renderHomeContent(store.homeData);
             } catch (e) {
-                app.innerHTML = `<div class="text-center text-red-500 py-20">Gagal memuat: ${e.message}</div>`;
+                app.innerHTML = `<div class="text-center text-red-500 py-20">Gagal: ${e.message}</div>`;
             }
         }
 
         function renderHomeContent(sections) {
             const container = document.getElementById('home-container');
             if(!container) return;
-            container.innerHTML = ''; // Clear skeleton
+            container.innerHTML = ''; 
 
             sections.forEach(sec => {
                 if (!sec.books.length) return;
                 const sectionDiv = document.createElement('section');
                 sectionDiv.innerHTML = `
                     <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3 flex items-center gap-2">
-                        ${sec.title} <i class="fas fa-chevron-right text-xs text-gray-600"></i>
+                        ${sec.title}
                     </h2>
                     <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 sm:gap-4 content-grid"></div>
                 `;
@@ -332,19 +315,12 @@
             });
         }
 
-        // 2. FAVORITES & HISTORY (Local Data)
         function renderFavorites() {
             const app = document.getElementById('app');
             app.innerHTML = '<h2 class="text-xl font-bold text-white mb-6 px-1">Favorit Saya</h2>';
-            
             const favs = getLS(LS_KEYS.FAVS);
-            const list = Object.values(favs); // Convert object to array
-
-            if (list.length === 0) {
-                app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true));
-                return;
-            }
-
+            const list = Object.values(favs);
+            if (list.length === 0) { app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true)); return; }
             const grid = document.createElement('div');
             grid.className = 'grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in';
             list.forEach(book => grid.appendChild(createGridItem(book)));
@@ -354,36 +330,24 @@
         function renderHistory() {
             const app = document.getElementById('app');
             app.innerHTML = '<h2 class="text-xl font-bold text-white mb-6 px-1">Riwayat Tontonan</h2>';
-            
             const hist = getLS(LS_KEYS.HISTORY);
-            // Sort by timestamp descending (terbaru di atas)
             const list = Object.values(hist).sort((a, b) => b.timestamp - a.timestamp);
-
-            if (list.length === 0) {
-                app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true));
-                return;
-            }
-
+            if (list.length === 0) { app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true)); return; }
             const grid = document.createElement('div');
             grid.className = 'grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in';
-            list.forEach(book => grid.appendChild(createGridItem(book, true))); // true = show progress
+            list.forEach(book => grid.appendChild(createGridItem(book, true)));
             app.appendChild(grid);
         }
 
-        // 3. ACCOUNT
         function renderAccount() {
             const app = document.getElementById('app');
             app.innerHTML = '';
             app.appendChild(document.getElementById('tpl-account').content.cloneNode(true));
         }
 
-        // 4. PLAYER
         async function renderPlayer(bookId, chapterIndex) {
             const app = document.getElementById('app');
-            app.innerHTML = ''; // Clear previous content
-            
-            // Render Skeleton Loading Player
-            app.innerHTML = `<div class="max-w-xl mx-auto pt-10 text-center">
+            app.innerHTML = `<div class="max-w-2xl mx-auto pt-10 text-center">
                 <div class="aspect-vertical-video bg-zinc-900 rounded-xl skeleton mb-4"></div>
                 <div class="h-6 w-3/4 bg-zinc-800 rounded skeleton mx-auto"></div>
             </div>`;
@@ -391,37 +355,23 @@
             try {
                 const res = await fetch(`${API_BASE}?type=chapter&bookId=${bookId}`);
                 const json = await res.json();
-
                 if (json.error) throw new Error(json.error);
 
                 const chapters = json.chapters || [];
                 const currentChap = chapters.find(c => c.index === chapterIndex) || chapters[0];
                 const info = json.info || {};
                 
-                // Simpan ke Store untuk akses global
                 store.currentBook = { ...info, id: bookId };
-
-                // Simpan Riwayat (History) - AUTO SAVE
                 saveToHistory(bookId, info, currentChap.index);
 
-                // Render Real Player
                 app.innerHTML = '';
                 const tpl = document.getElementById('tpl-player').content.cloneNode(true);
 
-                // Setup Video
-                const vid = tpl.getElementById('video-el');
+                const vid = tpl.querySelector('#video-el');
                 vid.src = currentChap.url;
                 vid.poster = info.cover;
-                
-                // Loading handler
-                vid.oncanplay = () => { 
-                    tpl.getElementById('video-loader')?.classList.add('hidden'); 
-                };
-                vid.onwaiting = () => {
-                    tpl.getElementById('video-loader')?.classList.remove('hidden');
-                };
-                
-                // Auto Next
+                vid.oncanplay = () => tpl.querySelector('#video-loader')?.classList.add('hidden');
+                vid.onwaiting = () => tpl.querySelector('#video-loader')?.classList.remove('hidden');
                 vid.onended = () => {
                     if (chapterIndex < chapters.length) {
                         const nextLink = `/player/${bookId}/${chapterIndex + 1}`;
@@ -430,27 +380,22 @@
                     }
                 };
 
-                // Setup Info
-                tpl.getElementById('drama-title').innerText = info.title;
-                tpl.getElementById('drama-desc').innerText = info.desc || 'Tidak ada deskripsi.';
-                tpl.getElementById('meta-views').innerText = info.views || '12k';
-                tpl.getElementById('meta-eps').innerText = info.totalEps || chapters.length;
-                tpl.getElementById('ep-display').innerText = currentChap.index;
+                // FIX: Gunakan querySelector bukan getElementById
+                tpl.querySelector('#drama-title').innerText = info.title || 'Drama';
+                tpl.querySelector('#drama-desc').innerText = info.desc || 'Tidak ada deskripsi.';
+                tpl.querySelector('#meta-views').innerText = info.views || '12k';
+                tpl.querySelector('#meta-eps').innerText = info.totalEps || chapters.length;
+                tpl.querySelector('#ep-display').innerText = currentChap.index;
 
-                // Setup Tags
-                const tagsEl = tpl.getElementById('meta-tags');
+                const tagsEl = tpl.querySelector('#meta-tags');
                 if(info.tags) tagsEl.innerHTML = info.tags.map(t => `<span class="bg-zinc-800 border border-zinc-700 text-[10px] px-2 py-1 rounded text-gray-400">${t}</span>`).join('');
 
-                // Setup Fav Button State
-                const favBtn = tpl.getElementById('btn-fav');
+                const favBtn = tpl.querySelector('#btn-fav');
                 const favs = getLS(LS_KEYS.FAVS);
-                if (favs[bookId]) {
-                    favBtn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl"></i>'; // Solid heart
-                }
+                if (favs[bookId]) favBtn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl"></i>';
 
-                // Navigasi Prev/Next
-                const btnPrev = tpl.getElementById('btn-prev');
-                const btnNext = tpl.getElementById('btn-next');
+                const btnPrev = tpl.querySelector('#btn-prev');
+                const btnNext = tpl.querySelector('#btn-next');
                 
                 if (chapterIndex > 1) {
                     btnPrev.href = `/player/${bookId}/${chapterIndex - 1}`;
@@ -462,9 +407,7 @@
                     btnNext.onclick = (e) => navigate(e, btnNext.href);
                 } else btnNext.classList.add('opacity-50', 'pointer-events-none');
 
-                // Grid Episode
-                const grid = tpl.getElementById('ep-grid');
-                // Gunakan fragment agar performa lebih cepat
+                const grid = tpl.querySelector('#ep-grid');
                 const fragment = document.createDocumentFragment();
                 chapters.forEach(ch => {
                     const a = document.createElement('a');
@@ -476,50 +419,33 @@
                 });
                 grid.appendChild(fragment);
 
-                // Related Videos (Ambil dari homeData secara acak untuk simulasi)
                 if (store.homeData && store.homeData.length > 0) {
-                    const relSec = tpl.getElementById('related-section');
-                    const relGrid = tpl.getElementById('related-grid');
+                    const relSec = tpl.querySelector('#related-section');
+                    const relGrid = tpl.querySelector('#related-grid');
                     relSec.classList.remove('hidden');
-                    
-                    // Ambil semua buku, flat map, shuffle, ambil 6
                     const allBooks = store.homeData.flatMap(s => s.books).filter(b => b.id != bookId);
                     const randomRelated = allBooks.sort(() => 0.5 - Math.random()).slice(0, 6);
-                    
                     randomRelated.forEach(b => relGrid.appendChild(createGridItem(b)));
                 }
 
                 app.appendChild(tpl);
-                
-                // Scroll ke active episode di grid
                 setTimeout(() => {
                      const activeEp = grid.querySelector('.bg-red-600');
                      if(activeEp) activeEp.scrollIntoView({behavior: 'smooth', block: 'center'});
                 }, 500);
 
-                document.title = `Nonton ${info.title} - Eps ${currentChap.index}`;
-
             } catch (e) {
-                app.innerHTML = `<div class="text-center py-40 text-gray-400">
-                    <i class="fas fa-exclamation-circle text-4xl mb-2 text-red-500"></i><br>
-                    ${e.message}
-                    <br><a href="/" onclick="navigate(event, '/')" class="underline mt-4 block">Kembali ke Beranda</a>
-                </div>`;
+                app.innerHTML = `<div class="text-center py-40 text-gray-400"><i class="fas fa-exclamation-circle text-4xl mb-2 text-red-500"></i><br>${e.message}<br><a href="/" onclick="navigate(event, '/')" class="underline mt-4 block">Kembali ke Beranda</a></div>`;
             }
         }
-
-        // --- COMPONENTS ---
 
         function createGridItem(book, showProgress = false) {
             const tpl = document.getElementById('tpl-grid-item').content.cloneNode(true);
             const a = tpl.querySelector('a');
             const img = tpl.querySelector('img');
             
-            // Tentukan link: Jika history, lanjut ke episode terakhir. Jika tidak, ke ep 1.
             let linkUrl = `/player/${book.id}/1`;
-            if (showProgress && book.lastEpisode) {
-                linkUrl = `/player/${book.id}/${book.lastEpisode}`;
-            }
+            if (showProgress && book.lastEpisode) linkUrl = `/player/${book.id}/${book.lastEpisode}`;
 
             a.href = linkUrl;
             img.src = book.cover;
@@ -527,34 +453,19 @@
             tpl.querySelector('.book-title').innerText = book.title;
 
             if (showProgress && book.lastEpisode) {
-                const progContainer = tpl.querySelector('.progress-container');
-                const progBar = tpl.querySelector('.progress-bar');
-                progContainer.classList.remove('hidden');
-                
-                // Hitung persentase (Dummy logic jika total eps tidak ada, anggap 100)
+                tpl.querySelector('.progress-container').classList.remove('hidden');
                 let total = parseInt(book.episodes) || 100; 
                 let pct = (book.lastEpisode / total) * 100;
-                progBar.style.width = `${pct}%`;
-                
-                // Tambah label "Eps X"
-                const tag = tpl.querySelector('.ep-count').parentNode;
-                tag.innerHTML = `<i class="fas fa-history text-red-500 mr-1"></i> Eps ${book.lastEpisode}`;
+                tpl.querySelector('.progress-bar').style.width = `${pct}%`;
+                tpl.querySelector('.ep-count').parentNode.innerHTML = `<i class="fas fa-history text-red-500 mr-1"></i> Eps ${book.lastEpisode}`;
             }
-
             return tpl;
         }
-
-        // --- ACTIONS ---
 
         function saveToHistory(bookId, info, epIndex) {
             const hist = getLS(LS_KEYS.HISTORY);
             hist[bookId] = {
-                id: bookId,
-                title: info.title,
-                cover: info.cover,
-                episodes: info.totalEps,
-                lastEpisode: epIndex,
-                timestamp: Date.now()
+                id: bookId, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: epIndex, timestamp: Date.now()
             };
             setLS(LS_KEYS.HISTORY, hist);
         }
@@ -564,60 +475,33 @@
             const book = store.currentBook;
             const favs = getLS(LS_KEYS.FAVS);
             const btn = document.getElementById('btn-fav');
-
-            if (favs[book.id]) {
-                delete favs[book.id];
-                btn.innerHTML = '<i class="far fa-heart text-xl"></i>'; // Outline
-            } else {
-                favs[book.id] = {
-                    id: book.id,
-                    title: book.title,
-                    cover: book.cover,
-                    episodes: book.totalEps
-                };
-                btn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl transition transform scale-125"></i>'; // Solid
-            }
+            if (favs[book.id]) { delete favs[book.id]; btn.innerHTML = '<i class="far fa-heart text-xl"></i>'; } 
+            else { favs[book.id] = { id: book.id, title: book.title, cover: book.cover, episodes: book.totalEps }; btn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl transition transform scale-125"></i>'; }
             setLS(LS_KEYS.FAVS, favs);
         };
 
-        // Search Handler
         document.getElementById('search-input').addEventListener('keypress', async (e) => {
             if (e.key === 'Enter') {
                 const q = e.target.value;
                 if(!q) return;
-                
-                // Pindah ke tab home dulu
                 switchTab('home');
                 const container = document.getElementById('home-container');
                 container.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fas fa-search fa-spin"></i> Mencari...</div>';
-                
                 try {
                     const res = await fetch(`${API_BASE}?type=search&keyword=${encodeURIComponent(q)}`);
                     const json = await res.json();
-                    
-                    // Render hasil pencarian sebagai satu section
                     container.innerHTML = '';
                     const secDiv = document.createElement('div');
-                    secDiv.innerHTML = `
-                        <h2 class="text-lg font-bold text-white mb-4">Hasil: "${q}"</h2>
-                        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 content-grid"></div>
-                    `;
+                    secDiv.innerHTML = `<h2 class="text-lg font-bold text-white mb-4">Hasil: "${q}"</h2><div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 content-grid"></div>`;
                     const grid = secDiv.querySelector('.content-grid');
-                    
-                    if (json.sections && json.sections[0].books.length > 0) {
-                        json.sections[0].books.forEach(b => grid.appendChild(createGridItem(b)));
-                    } else {
-                        secDiv.innerHTML += '<p class="text-gray-500 text-sm">Tidak ditemukan.</p>';
-                    }
+                    if (json.sections && json.sections[0].books.length > 0) { json.sections[0].books.forEach(b => grid.appendChild(createGridItem(b))); } 
+                    else { secDiv.innerHTML += '<p class="text-gray-500 text-sm">Tidak ditemukan.</p>'; }
                     container.appendChild(secDiv);
-
                 } catch(err) { console.error(err); }
             }
         });
 
-        // Init
         router();
-
     </script>
 </body>
 </html>
