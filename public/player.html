@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Player - Dramabox</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #000; color: #e5e5e5; font-family: sans-serif; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .aspect-vertical { aspect-ratio: 9/16; max-height: 85vh; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <nav class="fixed top-0 w-full bg-black/50 backdrop-blur z-50 h-14 flex items-center px-4">
+        <a href="/" class="text-white flex items-center gap-2">
+            <i class="fas fa-chevron-left"></i> Kembali
+        </a>
+        <div class="ml-auto">
+            <select id="quality-select" class="bg-black/50 text-xs text-white border border-white/20 rounded px-2 py-1 outline-none hidden">
+            </select>
+        </div>
+    </nav>
+
+    <main class="flex-1 flex flex-col items-center justify-center pt-14 pb-10 px-0 sm:px-4 w-full max-w-lg mx-auto">
+        
+        <div class="w-full bg-black relative group aspect-vertical">
+            <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain" referrerpolicy="no-referrer" preload="auto"></video>
+            
+            <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
+                <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl"></i>
+            </div>
+        </div>
+
+        <div class="w-full px-4 mt-4">
+            <h1 id="title" class="text-lg font-bold text-white line-clamp-1">Memuat...</h1>
+            
+            <div class="flex justify-between items-center mt-4 gap-4">
+                <a id="btn-prev" class="flex-1 py-3 bg-zinc-800 rounded-lg text-center text-sm font-bold text-gray-300 disabled:opacity-50"><i class="fas fa-step-backward"></i> Prev</a>
+                <span class="text-sm font-mono text-gray-500">EPS <span id="ep-idx" class="text-white text-lg font-bold">-</span></span>
+                <a id="btn-next" class="flex-1 py-3 bg-red-600 rounded-lg text-center text-sm font-bold text-white shadow-lg shadow-red-900/30">Next <i class="fas fa-step-forward"></i></a>
+            </div>
+
+            <div class="mt-6">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xs uppercase text-gray-500 font-bold">Daftar Episode</h3>
+                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-400 text-xl"><i class="far fa-heart"></i></button>
+                </div>
+                <div id="ep-grid" class="grid grid-cols-6 gap-2 max-h-40 overflow-y-auto hide-scroll"></div>
+            </div>
+            
+            <div class="mt-6 p-4 bg-zinc-900 rounded-lg">
+                 <p id="desc" class="text-xs text-gray-400 leading-relaxed line-clamp-3" onclick="this.classList.toggle('line-clamp-3')"></p>
+            </div>
+
+             <div class="mt-6 pt-6 border-t border-zinc-800">
+                <h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Rekomendasi</h3>
+                <div id="related-grid" class="grid grid-cols-3 gap-2"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API = "/api/data";
+        
+        // Get ID from URL: /player/123/1
+        const pathParts = window.location.pathname.split('/');
+        const bookId = pathParts[2];
+        const epIndex = parseInt(pathParts[3]) || 1;
+
+        // LocalStorage
+        const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
+        const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+        let currentInfo = null;
+
+        async function init() {
+            try {
+                const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
+                const json = await res.json();
+                if(json.error) throw new Error(json.error);
+
+                const chapters = json.chapters || [];
+                const currentChap = chapters.find(c => c.index === epIndex) || chapters[0];
+                const info = json.info || {};
+                currentInfo = info;
+
+                // Save History
+                const hist = getLS('db_history');
+                hist[bookId] = { id: bookId, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: epIndex, timestamp: Date.now() };
+                setLS('db_history', hist);
+
+                renderPlayer(json, currentChap, chapters);
+
+            } catch(e) {
+                document.getElementById('title').innerText = "Error: " + e.message;
+                document.getElementById('loader').classList.add('hidden');
+            }
+        }
+
+        function renderPlayer(data, currentChap, chapters) {
+            // 1. Video & Quality
+            const vid = document.getElementById('video-el');
+            const loader = document.getElementById('loader');
+            const qSelect = document.getElementById('quality-select');
+
+            // Cek apakah sources array atau string url
+            if (currentChap.sources && Array.isArray(currentChap.sources)) {
+                // Multi Quality
+                qSelect.classList.remove('hidden');
+                qSelect.innerHTML = currentChap.sources.map((s, i) => `<option value="${s.url}">${s.q}p</option>`).join('');
+                
+                // Default pilih kualitas pertama (tertinggi)
+                vid.src = currentChap.sources[0].url;
+
+                // Ganti kualitas
+                qSelect.onchange = (e) => {
+                    const time = vid.currentTime;
+                    vid.src = e.target.value;
+                    vid.currentTime = time;
+                    vid.play();
+                };
+            } else {
+                // Single Quality
+                vid.src = currentChap.url;
+            }
+
+            vid.poster = data.info.cover;
+            vid.oncanplay = () => loader.classList.add('hidden');
+            vid.onwaiting = () => loader.classList.remove('hidden');
+            vid.onended = () => {
+                if(epIndex < chapters.length) window.location.href = `/player/${bookId}/${epIndex+1}`;
+            };
+
+            // 2. Info
+            document.getElementById('title').innerText = data.info.title;
+            document.getElementById('desc').innerText = data.info.desc || 'Tidak ada deskripsi.';
+            document.getElementById('ep-idx').innerText = currentChap.index;
+
+            // 3. Nav Buttons
+            const prev = document.getElementById('btn-prev');
+            const next = document.getElementById('btn-next');
+            if(epIndex > 1) prev.href = `/player/${bookId}/${epIndex-1}`;
+            else prev.classList.add('opacity-50', 'pointer-events-none');
+            
+            if(epIndex < chapters.length) next.href = `/player/${bookId}/${epIndex+1}`;
+            else next.classList.add('opacity-50', 'pointer-events-none');
+
+            // 4. Grid
+            const grid = document.getElementById('ep-grid');
+            grid.innerHTML = chapters.map(ch => `
+                <a href="/player/${bookId}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===epIndex ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>
+            `).join('');
+            
+            // Scroll to active
+            setTimeout(() => {
+                const active = grid.querySelector('.bg-red-600');
+                if(active) active.scrollIntoView({block: 'center'});
+            }, 500);
+
+            // 5. Fav Button State
+            updateFavBtn();
+
+            // 6. Related
+            if(data.related) {
+                document.getElementById('related-grid').innerHTML = data.related.slice(0,6).map(b => `
+                    <a href="/player/${b.id}/1" class="block">
+                        <div class="aspect-[2/3] bg-zinc-800 rounded overflow-hidden mb-1"><img src="${b.cover}" class="w-full h-full object-cover"></div>
+                        <div class="text-[10px] text-gray-400 line-clamp-1">${b.title}</div>
+                    </a>
+                `).join('');
+            }
+
+            document.title = `Nonton ${data.info.title} - Ep ${currentChap.index}`;
+        }
+
+        function toggleFav() {
+            if(!currentInfo) return;
+            const favs = getLS('db_favs');
+            if(favs[bookId]) delete favs[bookId];
+            else favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
+            setLS('db_favs', favs);
+            updateFavBtn();
+        }
+
+        function updateFavBtn() {
+            const favs = getLS('db_favs');
+            const btn = document.getElementById('fav-btn');
+            if(favs[bookId]) btn.innerHTML = '<i class="fas fa-heart text-red-600"></i>';
+            else btn.innerHTML = '<i class="far fa-heart"></i>';
+        }
+
+        init();
+    </script>
+</body>
+</html>
