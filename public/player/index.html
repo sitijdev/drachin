@@ -12,7 +12,6 @@
         .hide-scroll::-webkit-scrollbar { display: none; }
         .aspect-vertical { aspect-ratio: 9/16; max-height: 85vh; }
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-        .expanded { -webkit-line-clamp: unset; }
     </style>
 </head>
 <body class="flex flex-col min-h-screen">
@@ -30,20 +29,30 @@
             <div class="w-full bg-black relative group aspect-vertical rounded-xl overflow-hidden ring-1 ring-zinc-800 shadow-2xl mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer" preload="auto"></video>
                 <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
-                    <div class="text-center"><i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i><p class="text-xs text-gray-500">Memuat...</p></div>
+                    <div class="text-center">
+                        <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i>
+                        <p class="text-xs text-gray-500">Memuat...</p>
+                    </div>
                 </div>
             </div>
 
             <div class="mt-5 px-4 sm:px-0">
                 <div class="flex justify-between items-start gap-2">
                     <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">...</h1>
-                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-500 text-xl"><i class="far fa-heart"></i></button>
+                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-500 text-xl hover:scale-110 transition"><i class="far fa-heart"></i></button>
                 </div>
 
                 <div class="flex items-center mt-4 gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800">
-                    <a id="btn-prev" class="flex-1 py-2.5 bg-zinc-800 rounded-lg text-center text-xs font-bold text-gray-400 disabled:opacity-50"><i class="fas fa-step-backward"></i> Prev</a>
-                    <div class="text-center px-2"><span class="text-[10px] text-gray-500 block">EPISODE</span><span id="ep-idx" class="text-white text-lg font-bold leading-none">-</span></div>
-                    <a id="btn-next" class="flex-[2] py-2.5 bg-red-600 rounded-lg text-center text-sm font-bold text-white">Lanjut <i class="fas fa-step-forward"></i></a>
+                    <a id="btn-prev" class="flex-1 py-2.5 bg-zinc-800 rounded-lg text-center text-xs font-bold text-gray-400 hover:bg-zinc-700 transition cursor-pointer select-none">
+                        <i class="fas fa-step-backward"></i> Prev
+                    </a>
+                    <div class="text-center px-2">
+                        <span class="text-[10px] text-gray-500 block">EPISODE</span>
+                        <span id="ep-idx" class="text-white text-lg font-bold leading-none">-</span>
+                    </div>
+                    <a id="btn-next" class="flex-[2] py-2.5 bg-red-600 rounded-lg text-center text-sm font-bold text-white hover:bg-red-700 transition cursor-pointer select-none">
+                        Lanjut <i class="fas fa-step-forward"></i>
+                    </a>
                 </div>
 
                 <div class="mt-4 p-4 bg-zinc-900 rounded-xl border border-zinc-800/50">
@@ -60,77 +69,158 @@
 
     <script>
         const API = "/api/data";
-        const pathParts = window.location.pathname.split('/'); 
-        const bookId = pathParts[2]; 
-        const epIndex = parseInt(pathParts[3]) || 1;
 
-        const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
-        const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+        // --- 1. LOGIKA PARSING URL (SEO FRIENDLY) ---
+        // Format URL: /player/BOOKID-EPISODE (Contoh: /player/105-12)
+        
+        // Ambil segmen terakhir dari URL (misal: "105-12")
+        const pathSegments = window.location.pathname.replace(/\/+$/, '').split('/');
+        const slug = pathSegments[pathSegments.length - 1];
+
+        // Pisahkan Book ID dan Episode berdasarkan strip terakhir (-)
+        // Kita pakai lastIndexOf agar aman jika Book ID mengandung strip (misal: harry-potter-1)
+        const separatorIndex = slug.lastIndexOf('-');
+        
+        let bookId = null;
+        let urlEpIndex = 1;
+
+        if (separatorIndex !== -1) {
+            bookId = slug.substring(0, separatorIndex); // Ambil string sebelum strip terakhir
+            urlEpIndex = parseInt(slug.substring(separatorIndex + 1)) || 1; // Ambil angka setelah strip
+        } else {
+            // Fallback jika format salah (misal user cuma ketik /player/123)
+            bookId = slug;
+        }
+
+        // --- HELPER ---
+        const getLS = (k) => JSON.parse(localStorage.getItem(k) || '{}');
+        const setLS = (k, v) => localStorage.setItem(k, JSON.stringify(v));
         let currentInfo = null;
 
+        // --- INIT ---
         async function init() {
-            if(!bookId) return;
+            if (!bookId) return; // Stop jika ID kosong
+
             try {
+                // Fetch Data API
                 const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
                 const json = await res.json();
-                if(json.error) throw new Error(json.error);
+                if (json.error) throw new Error(json.error);
                 
                 const chapters = json.chapters || [];
-                const currentChap = chapters.find(c => c.index === epIndex) || chapters[0];
+                if (chapters.length === 0) throw new Error("Belum ada episode.");
+                
                 currentInfo = json.info || {};
 
-                // Save History
-                const hist = getLS('db_history');
-                hist[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps, lastEpisode: epIndex, timestamp: Date.now() };
-                setLS('db_history', hist);
+                // Cari Object Chapter yang sesuai dengan Episode di URL
+                let currentChap = chapters.find(c => c.index === urlEpIndex);
 
-                renderUI(json, currentChap, chapters);
-            } catch(e) {
-                document.getElementById('loader').innerHTML = `<div class="text-red-500 text-center">${e.message}</div>`;
+                // Jika episode di URL tidak ditemukan (misal user asal ketik angka), fallback ke Ep 1
+                if (!currentChap) {
+                    console.warn("Episode tidak ditemukan, memuat episode pertama.");
+                    currentChap = chapters[0];
+                    // Update URL di browser tanpa reload agar user tahu
+                    history.replaceState(null, '', `/player/${bookId}-${currentChap.index}`);
+                }
+
+                // Simpan History
+                saveHistory(currentChap);
+
+                // Render UI
+                renderUI(currentInfo, currentChap, chapters);
+
+            } catch (e) {
+                document.getElementById('loader').innerHTML = `<div class="text-red-500 text-center px-4">${e.message}</div>`;
             }
         }
 
-        function renderUI(data, currentChap, chapters) {
+        function saveHistory(chap) {
+            const hist = getLS('db_history');
+            hist[bookId] = { 
+                id: bookId, 
+                title: currentInfo.title, 
+                cover: currentInfo.cover, 
+                episodes: currentInfo.totalEps, 
+                lastEpisode: chap.index, 
+                timestamp: Date.now() 
+            };
+            setLS('db_history', hist);
+        }
+
+        function renderUI(info, currentChap, chapters) {
             const vid = document.getElementById('video-el');
             const qSelect = document.getElementById('quality-select');
-            
-            // Video
-            if(currentChap.sources && currentChap.sources.length) {
+
+            // --- NAVIGASI BERDASARKAN ARRAY INDEX (Lebih Stabil) ---
+            const arrayIndex = chapters.findIndex(c => c.index === currentChap.index);
+            const prevChap = chapters[arrayIndex - 1];
+            const nextChap = chapters[arrayIndex + 1];
+
+            // Video Source Logic
+            if (currentChap.sources && currentChap.sources.length) {
                 qSelect.classList.remove('hidden');
                 qSelect.innerHTML = currentChap.sources.map(s => `<option value="${s.url}">${s.q}p</option>`).join('');
                 vid.src = currentChap.sources[0].url;
-                qSelect.onchange = (e) => { const t=vid.currentTime; vid.src=e.target.value; vid.currentTime=t; vid.play(); }
+                
+                qSelect.onchange = (e) => {
+                    const t = vid.currentTime; const p = !vid.paused;
+                    vid.src = e.target.value; vid.currentTime = t;
+                    if(p) vid.play();
+                }
             } else {
+                qSelect.classList.add('hidden');
                 vid.src = currentChap.url;
             }
-            vid.poster = data.info.cover;
+            
+            vid.poster = info.cover;
             vid.oncanplay = () => document.getElementById('loader').classList.add('hidden');
+            
+            // Auto Next
             vid.onended = () => {
-                if(epIndex < chapters.length) window.location.href = `/player/${bookId}/${epIndex+1}`;
+                if(nextChap) window.location.href = `/player/${bookId}-${nextChap.index}`;
             };
 
-            // Info
-            document.getElementById('title').innerText = data.info.title;
-            document.getElementById('desc').innerText = data.info.desc;
+            // Info Text
+            document.getElementById('title').innerText = info.title;
+            document.getElementById('desc').innerText = info.desc;
             document.getElementById('ep-idx').innerText = currentChap.index;
 
-            // Nav Buttons
-            const prev = document.getElementById('btn-prev');
-            const next = document.getElementById('btn-next');
-            if(epIndex > 1) prev.href = `/player/${bookId}/${epIndex-1}`; else prev.classList.add('opacity-50','pointer-events-none');
-            if(epIndex < chapters.length) next.href = `/player/${bookId}/${epIndex+1}`; else next.classList.add('opacity-50','pointer-events-none');
+            // Nav Buttons Update
+            const prevBtn = document.getElementById('btn-prev');
+            const nextBtn = document.getElementById('btn-next');
 
-            // Grid
-            document.getElementById('ep-grid').innerHTML = chapters.map(ch => 
-                `<a href="/player/${bookId}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===epIndex ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>`
-            ).join('');
+            if (prevChap) {
+                prevBtn.href = `/player/${bookId}-${prevChap.index}`;
+                prevBtn.classList.remove('opacity-50', 'pointer-events-none');
+            } else {
+                prevBtn.removeAttribute('href');
+                prevBtn.classList.add('opacity-50', 'pointer-events-none');
+            }
+
+            if (nextChap) {
+                nextBtn.href = `/player/${bookId}-${nextChap.index}`;
+                nextBtn.classList.remove('opacity-50', 'pointer-events-none', 'bg-zinc-800');
+                nextBtn.classList.add('bg-red-600');
+                nextBtn.innerHTML = `Lanjut <i class="fas fa-step-forward"></i>`;
+            } else {
+                nextBtn.removeAttribute('href');
+                nextBtn.classList.add('opacity-50', 'pointer-events-none', 'bg-zinc-800');
+                nextBtn.classList.remove('bg-red-600');
+                nextBtn.innerHTML = `Tamat <i class="fas fa-check"></i>`;
+            }
+
+            // Grid Episode
+            document.getElementById('ep-grid').innerHTML = chapters.map(ch => {
+                const isActive = ch.index === currentChap.index;
+                return `<a href="/player/${bookId}-${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${isActive ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>`
+            }).join('');
             
             updateFavBtn();
         }
 
         function toggleFav() {
             const favs = getLS('db_favs');
-            if(favs[bookId]) delete favs[bookId];
+            if (favs[bookId]) delete favs[bookId];
             else favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
             setLS('db_favs', favs);
             updateFavBtn();
