@@ -1,5 +1,5 @@
 // ============================================================================
-// 1. KONFIGURASI & KREDENSIAL
+// 1. KONFIGURASI KREDENSIAL
 // ============================================================================
 
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
@@ -31,18 +31,12 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-// KREDENSIAL (Update jika expired)
 const MANUAL_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnlaV2RwYzNSbGNsUjVjR1VpT2lKVVJVMVFJaXdpZFhObGNrbGtJam96TXpZd09EUXdOVFo5LkFLMWw0d01Ud00xVndOTHBOeUlOcmtHN3dmb0czaGROMEgxNWVPZV9KaHc=";
 const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
 const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
 const MANUAL_USER_ID = "336084056";
-
 const FAKE_APP_VERSION = "451"; 
 const FAKE_VN_VERSION = "4.5.1";
-
-// ============================================================================
-// 2. ROUTER HANDLER
-// ============================================================================
 
 export async function onRequest(context) {
   try {
@@ -51,7 +45,6 @@ export async function onRequest(context) {
     const type = url.searchParams.get("type");
     const bookId = url.searchParams.get("bookId");
     const keyword = url.searchParams.get("keyword");
-    
     const SERIES_JSON_URL = `${url.origin}/series.json`;
 
     // --- A. SEARCH ---
@@ -76,14 +69,13 @@ export async function onRequest(context) {
 
       const combined = [...localResults, ...apiResults];
       const unique = combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
-
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH-HYBRID");
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH");
     }
 
     // --- B. LIST (HOME) ---
     if (type === "list") {
-      const combinedSections = [];
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
+      const combinedSections = [];
       
       if (localData.length > 0) {
           combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0, 15).map(mapLocalBook) });
@@ -93,76 +85,65 @@ export async function onRequest(context) {
       return jsonResponse({ sections: combinedSections }, "LIST");
     }
 
-    // --- C. DETAIL & CHAPTER (SMART REVALIDATION) ---
+    // --- C. DETAIL & CHAPTER (UNLOCKER V3) ---
     if (type === "chapter" && bookId) {
-      const cacheKey = `unlock_v9_${bookId}`; // Ganti key ke v9 agar cache lama yang rusak tidak terpakai
-
-      // 1. Cek Cache (Tapi simpan dulu, jangan langsung return)
-      let cachedData = null;
+      const cacheKey = `unlock_v10_${bookId}`; // Cache Key Baru
       if (env.DRAMABOX_CACHE) {
-        const cachedStr = await env.DRAMABOX_CACHE.get(cacheKey);
-        if (cachedStr) cachedData = JSON.parse(cachedStr);
+        const cached = await env.DRAMABOX_CACHE.get(cacheKey);
+        if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
       }
 
-      // 2. Ambil Metadata LIVE dari Webfic (Sumber Kebenaran)
+      // 1. Ambil Metadata dari Webfic
       const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${bookId}&tlanguage=in`);
-      
-      // Fallback: Jika Webfic down, terpaksa pakai cache apa adanya
-      if (!webficRes.ok && cachedData) return jsonResponse(cachedData, "CACHE-FALLBACK");
-      if (!webficRes.ok) return jsonResponse({ error: "Gagal menghubungi server." }, "ERR-NETWORK");
-
+      if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data drama" }, "ERR");
       const webficJson = await webficRes.json();
       const liveData = webficJson.data;
       const liveChapterList = liveData?.chapterList || [];
 
-      if (liveChapterList.length === 0) return jsonResponse({ error: "Drama tidak ditemukan." }, "ERR-EMPTY");
+      if (liveChapterList.length === 0) return jsonResponse({ error: "Chapter tidak ditemukan" }, "ERR");
 
-      // 3. BANDINGKAN: Cache vs Live
-      // Jika cache kita punya jumlah episode SAMA atau LEBIH dari live, berarti aman.
-      if (cachedData && cachedData.chapters && cachedData.chapters.length >= liveChapterList.length) {
-          return jsonResponse(cachedData, "KV-CACHE-HIT");
-      }
-      
-      // Jika cache kurang (misal cache 10 eps, live 50 eps), lanjut ke proses DOWNLOAD ULANG.
-
-      // 4. SETUP DATA BARU
-      // Ambil rekomendasi dari Webfic
-      const relatedBooks = (liveData.recommends || []).map(b => ({
-          id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount
-      }));
-
-      // 5. UNLOCK VIDEO (Batch Download)
+      // 2. Unlock Video (Batch Download)
       const allChapterIds = liveChapterList.map(ch => ch.id);
       const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", {
           bookId: bookId,
           chapterIdList: allChapterIds
       });
 
-      // 6. MAPPING
+      // 3. Mapping Video (AMBIL SEMUA KUALITAS)
       const videoMap = {};
       if (unlockData?.data?.chapterVoList) {
           unlockData.data.chapterVoList.forEach(ch => {
               const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              const vidObj = cdn?.videoPathList?.find(v => v.quality === 720) || 
-                             cdn?.videoPathList?.find(v => v.quality === 540) || 
-                             cdn?.videoPathList?.[0];
-              if (vidObj?.videoPath) videoMap[ch.chapterId] = vidObj.videoPath;
+              // Simpan array kualitas, jangan cuma satu
+              if (cdn && cdn.videoPathList) {
+                  videoMap[ch.chapterId] = cdn.videoPathList.map(v => ({
+                      q: v.quality,
+                      url: v.videoPath
+                  })).sort((a, b) => b.q - a.q); // Urutkan dari tertinggi (720p) ke terendah
+              }
           });
       }
 
       const finalChapters = [];
       liveChapterList.forEach(ch => {
-          const vidUrl = videoMap[ch.id] || ch.mp4;
-          if (vidUrl) {
+          const sources = videoMap[ch.id];
+          // Fallback jika tidak ada di map, cek mp4 Webfic
+          if (!sources && ch.mp4) {
+               finalChapters.push({
+                  index: ch.index,
+                  title: ch.name || `Episode ${ch.index}`,
+                  sources: [{ q: 480, url: ch.mp4 }] // Asumsi webfic mp4
+               });
+          } else if (sources) {
               finalChapters.push({
                   index: ch.index,
                   title: ch.name || `Episode ${ch.index}`,
-                  url: vidUrl
+                  sources: sources
               });
           }
       });
 
-      if (finalChapters.length === 0) return jsonResponse({ error: "Video terkunci." }, "ERR");
+      if (finalChapters.length === 0) return jsonResponse({ error: "Video tidak tersedia." }, "ERR");
 
       const result = {
           info: {
@@ -176,13 +157,15 @@ export async function onRequest(context) {
               totalEps: finalChapters.length
           },
           chapters: finalChapters,
-          related: relatedBooks
+          // Rekomendasi dari Webfic atau kosong
+          related: (liveData.recommends || []).map(b => ({
+              id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount
+          }))
       };
 
-      // 7. UPDATE CACHE (Karena data baru lebih lengkap)
-      if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 })); // Cache 1 Jam cukup
+      if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
 
-      return jsonResponse(result, "LIVE-FETCH-UPDATED");
+      return jsonResponse(result, "SUCCESS");
     }
 
     return new Response("Invalid Request", { status: 400 });
@@ -228,7 +211,6 @@ async function fetchFromDramaBox(endpoint, payload) {
     "sn": signature, 
     "Language": "in", "Current-Language": "in", "Time-Zone": "+0700"
   };
-  
   const res = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
     method: "POST", headers, body: JSON.stringify(payload)
   });
