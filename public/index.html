@@ -73,34 +73,39 @@
                         homeData = json.sections;
                     } catch(e) { app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat. Cek koneksi.</div>'; return; }
                 }
-                homeData.forEach(sec => {
-                    if(!sec.books.length) return;
-                    app.innerHTML += `
-                        <section class="mb-8">
-                            <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3">${sec.title}</h2>
-                            <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-                                ${sec.books.map(b => createCard(b)).join('')}
-                            </div>
-                        </section>`;
-                });
+                
+                if(homeData && homeData.length) {
+                    homeData.forEach(sec => {
+                        if(!sec.books.length) return;
+                        app.innerHTML += `
+                            <section class="mb-8 animate-fade-in">
+                                <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3">${sec.title}</h2>
+                                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                                    ${sec.books.map(b => createCard(b)).join('')}
+                                </div>
+                            </section>`;
+                    });
+                } else {
+                    app.innerHTML = '<div class="text-center py-20 text-gray-500">Tidak ada data drama.</div>';
+                }
             } 
             else if(currentTab === 'favorites' || currentTab === 'history') {
                 const key = currentTab === 'favorites' ? 'db_favs' : 'db_history';
                 const data = Object.values(getLS(key)).sort((a,b) => b.timestamp - a.timestamp);
                 app.innerHTML = `<h2 class="text-xl font-bold text-white mb-6 capitalize">${currentTab} Saya</h2>`;
-                if(data.length === 0) app.innerHTML += '<div class="text-center py-20 text-gray-500 flex flex-col items-center"><i class="fas fa-ghost text-4xl mb-2 opacity-50"></i><p>Belum ada data.</p></div>';
+                if(data.length === 0) app.innerHTML += '<div class="text-center py-20 text-gray-500 flex flex-col items-center animate-fade-in"><i class="fas fa-ghost text-4xl mb-2 opacity-50"></i><p>Belum ada data.</p></div>';
                 else {
-                    app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
+                    app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
                 }
             }
             else {
-                app.innerHTML = `<div class="text-center py-20 text-gray-400"><i class="fas fa-user-circle text-5xl mb-4"></i><br><h2 class="text-xl font-bold text-white">Pengguna Tamu</h2><p class="text-sm mt-2">Data tersimpan di browser ini.</p><button onclick="if(confirm('Hapus semua data?')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-zinc-800 rounded-full text-red-500 text-sm border border-zinc-700">Reset Data</button></div>`;
+                app.innerHTML = `<div class="text-center py-20 text-gray-400 animate-fade-in"><i class="fas fa-user-circle text-5xl mb-4"></i><br><h2 class="text-xl font-bold text-white">Pengguna Tamu</h2><p class="text-sm mt-2">Data tersimpan di browser ini.</p><button onclick="if(confirm('Hapus semua data?')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-zinc-800 rounded-full text-red-500 text-sm border border-zinc-700">Reset Data</button></div>`;
             }
         }
 
         function createCard(b, isHistory=false) {
-            // INI BAGIAN PENTING: Link langsung ke file player/index.html
-            // Cloudflare akan membaca _redirects dan mengarahkan /player/ID/EPS ke file tersebut
+            // LINK STANDARD (Tanpa onclick="navigate...")
+            // Browser akan merequest URL ini ke server, dan _redirects akan mengarahkannya ke player/index.html
             let url = `/player/${b.id}/1`;
             if(isHistory && b.lastEpisode) url = `/player/${b.id}/${b.lastEpisode}`;
             
@@ -108,7 +113,7 @@
             <a href="${url}" class="block group relative transition transform active:scale-95">
                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
                     <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
-                    <div class="absolute top-1 right-1 bg-black/80 text-[9px] px-1.5 py-0.5 rounded text-white font-bold">${b.episodes||'?'} Eps</div>
+                    <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes||'?'} Eps</div>
                     ${isHistory ? `<div class="absolute bottom-0 left-0 w-full h-1 bg-gray-700"><div class="bg-red-600 h-full" style="width: ${(b.lastEpisode/(parseInt(b.episodes)||100))*100}%"></div></div>` : ''}
                 </div>
                 <h3 class="text-xs font-medium text-gray-300 line-clamp-2 group-hover:text-white">${b.title}</h3>
@@ -126,7 +131,7 @@
                     const json = await res.json();
                     homeData = json.sections; 
                     switchTab('home');
-                } catch(e){ app.innerHTML='Gagal mencari.';}
+                } catch(e){ app.innerHTML='<div class="text-center py-20 text-red-500">Gagal mencari.</div>';}
             }
         });
 
