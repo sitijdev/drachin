@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Player</title>
     <meta name="theme-color" content="#000000">
+    <meta name="description" content="">
+    <meta property="og:type" content="video.other">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -97,6 +99,56 @@
         const setLS = (k, v) => localStorage.setItem(k, JSON.stringify(v));
         let currentInfo = null;
 
+        // --- SEO META UPDATER ---
+        function updateMeta(info) {
+            try {
+                const pageTitle = info && info.title ? `${info.title} - DramaChin` : 'DramaChin';
+                document.title = pageTitle;
+
+                const desc = info && (info.desc || info.description) ? (info.desc || info.description) : '';
+
+                // meta description
+                let metaDesc = document.querySelector('meta[name="description"]');
+                if (!metaDesc) {
+                    metaDesc = document.createElement('meta');
+                    metaDesc.setAttribute('name', 'description');
+                    document.head.appendChild(metaDesc);
+                }
+                metaDesc.setAttribute('content', desc);
+
+                // og:title
+                let ogTitle = document.querySelector('meta[property="og:title"]');
+                if (!ogTitle) {
+                    ogTitle = document.createElement('meta');
+                    ogTitle.setAttribute('property', 'og:title');
+                    document.head.appendChild(ogTitle);
+                }
+                ogTitle.setAttribute('content', info && info.title ? info.title : pageTitle);
+
+                // og:description
+                let ogDesc = document.querySelector('meta[property="og:description"]');
+                if (!ogDesc) {
+                    ogDesc = document.createElement('meta');
+                    ogDesc.setAttribute('property', 'og:description');
+                    document.head.appendChild(ogDesc);
+                }
+                ogDesc.setAttribute('content', desc);
+
+                // og:image
+                if (info && info.cover) {
+                    let ogImage = document.querySelector('meta[property="og:image"]');
+                    if (!ogImage) {
+                        ogImage = document.createElement('meta');
+                        ogImage.setAttribute('property', 'og:image');
+                        document.head.appendChild(ogImage);
+                    }
+                    ogImage.setAttribute('content', info.cover);
+                }
+            } catch (e) {
+                console.warn('updateMeta error', e);
+            }
+        }
+
         // --- INIT ---
         async function init() {
             if (!bookId) return; // Stop jika ID kosong
@@ -111,6 +163,9 @@
                 if (chapters.length === 0) throw new Error("Belum ada episode.");
                 
                 currentInfo = json.info || {};
+
+                // Update meta/title based on fetched info
+                updateMeta(currentInfo);
 
                 // Cari Object Chapter yang sesuai dengan Episode di URL
                 let currentChap = chapters.find(c => c.index === urlEpIndex);
@@ -150,6 +205,9 @@
         function renderUI(info, currentChap, chapters) {
             const vid = document.getElementById('video-el');
             const qSelect = document.getElementById('quality-select');
+
+            // update meta again in case info changed or arrived later
+            updateMeta(info);
 
             // --- NAVIGASI BERDASARKAN ARRAY INDEX (Lebih Stabil) ---
             const arrayIndex = chapters.findIndex(c => c.index === currentChap.index);
