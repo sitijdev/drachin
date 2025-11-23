@@ -28,7 +28,9 @@
     </style>
     <script type="application/ld+json" id="seo-schema">{}</script>
 </head>
-<body class="min-h-screen flex flex-col pb-24"> <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 transition-all duration-300" id="navbar">
+<body class="min-h-screen flex flex-col pb-24">
+
+    <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 transition-all duration-300" id="navbar">
         <div id="nav-left" class="flex items-center">
             <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
                 <i class="fas fa-play-circle text-2xl drop-shadow-md"></i>
@@ -107,7 +109,6 @@
             
             <div class="w-full bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-zinc-800 relative group aspect-vertical-video mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
-                
                 <div id="video-loader" class="absolute inset-0 flex items-center justify-center bg-black z-10 pointer-events-none">
                      <div class="flex flex-col items-center gap-2">
                         <i class="fas fa-circle-notch fa-spin text-red-600 text-3xl"></i>
@@ -122,6 +123,7 @@
                         <h1 id="drama-title" class="text-lg sm:text-xl font-bold text-white leading-tight mb-1"></h1>
                         <div class="flex items-center gap-3 text-xs text-gray-400">
                             <span class="bg-white/10 px-2 py-0.5 rounded"><i class="fas fa-eye text-red-500 mr-1"></i> <span id="meta-views">-</span></span>
+                            <span class="bg-white/10 px-2 py-0.5 rounded"><i class="fas fa-layer-group text-red-500 mr-1"></i> <span id="meta-eps">0</span> Eps</span>
                             <span class="bg-white/10 px-2 py-0.5 rounded"><i class="fas fa-clock text-red-500 mr-1"></i> Ep <span id="ep-display">1</span></span>
                         </div>
                     </div>
@@ -171,7 +173,6 @@
             </div>
             <h2 class="text-xl font-bold text-white mb-2">Pengguna Tamu</h2>
             <p class="text-gray-500 text-sm max-w-xs mx-auto mb-6">Riwayat tontonan tersimpan otomatis di perangkat ini.</p>
-            
             <div class="w-full max-w-sm space-y-3">
                  <button onclick="if(confirm('Hapus semua riwayat?')) { localStorage.clear(); location.reload(); }" class="w-full py-3 bg-red-900/20 text-red-500 border border-red-900/30 rounded-lg text-sm font-medium hover:bg-red-900/30 transition">
                     <i class="fas fa-trash-alt mr-2"></i> Hapus Data Riwayat
@@ -201,12 +202,10 @@
         const getLS = (key) => JSON.parse(localStorage.getItem(key) || '{}');
         const setLS = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
-        // --- ROUTER ---
         async function router() {
             const path = window.location.pathname;
-            
-            // Player Route
             const playerMatch = path.match(/^\/player\/(\d+)\/(\d+)$/);
+            
             if (playerMatch) {
                 updateNavbar('back');
                 updateBottomNav(null); 
@@ -214,7 +213,6 @@
                 return;
             }
 
-            // Tabs
             updateNavbar('home');
             updateBottomNav(store.currentTab);
 
@@ -274,8 +272,6 @@
             });
         }
 
-        // --- PAGES ---
-
         async function renderHome() {
             const app = document.getElementById('app');
             if (store.homeData) { renderHomeContent(store.homeData); return; }
@@ -308,7 +304,6 @@
                     </h2>
                     <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 sm:gap-4 content-grid"></div>
                 `;
-                
                 const grid = sectionDiv.querySelector('.content-grid');
                 sec.books.forEach(book => grid.appendChild(createGridItem(book)));
                 container.appendChild(sectionDiv);
@@ -380,7 +375,6 @@
                     }
                 };
 
-                // FIX: Gunakan querySelector bukan getElementById
                 tpl.querySelector('#drama-title').innerText = info.title || 'Drama';
                 tpl.querySelector('#drama-desc').innerText = info.desc || 'Tidak ada deskripsi.';
                 tpl.querySelector('#meta-views').innerText = info.views || '12k';
@@ -457,7 +451,6 @@
                 let total = parseInt(book.episodes) || 100; 
                 let pct = (book.lastEpisode / total) * 100;
                 tpl.querySelector('.progress-bar').style.width = `${pct}%`;
-                tpl.querySelector('.ep-count').parentNode.innerHTML = `<i class="fas fa-history text-red-500 mr-1"></i> Eps ${book.lastEpisode}`;
             }
             return tpl;
         }
