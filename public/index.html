@@ -51,37 +51,30 @@
         let currentTab = 'home';
         let homeData = null;
 
-        // Utils LocalStorage
         const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
 
-        // Fungsi Pindah Tab (Hanya untuk Home/Fav/History/Akun)
+        // FUNGSI GANTI TAB (Hanya untuk menu bawah)
         function switchTab(tab) {
             currentTab = tab;
-            // Update warna icon
-            document.querySelectorAll('.nav-btn').forEach(b => {
-                const isActive = b.id === `tab-${tab}`;
-                b.className = `nav-btn w-16 ${isActive ? 'text-red-500' : 'text-gray-500'}`;
-            });
+            document.querySelectorAll('.nav-btn').forEach(b => b.className = `nav-btn w-16 ${b.id===`tab-${tab}` ? 'text-red-500' : 'text-gray-500'}`);
             render();
         }
 
+        // FUNGSI RENDER HALAMAN DEPAN
         async function render() {
             const app = document.getElementById('app');
             app.innerHTML = '';
             
-            // 1. TAB HOME
+            // --- TAB BERANDA ---
             if(currentTab === 'home') {
                 if(!homeData) {
-                    // Skeleton Loading
+                    // Skeleton
                     app.innerHTML = '<div class="space-y-6 pt-4"><div class="h-6 w-32 bg-zinc-800 rounded skeleton"></div><div class="grid grid-cols-3 gap-3"><div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div><div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div><div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div></div></div>';
                     try {
                         const res = await fetch(`${API}?type=list`);
                         const json = await res.json();
                         homeData = json.sections;
-                    } catch(e) { 
-                        app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat. Cek koneksi.</div>'; 
-                        return; 
-                    }
+                    } catch(e) { app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat. Cek koneksi.</div>'; return; }
                 }
                 
                 if(homeData && homeData.length) {
@@ -99,65 +92,38 @@
                     app.innerHTML = '<div class="text-center py-20 text-gray-500">Tidak ada data drama.</div>';
                 }
             } 
-            // 2. TAB FAVORIT & RIWAYAT
+            // --- TAB FAVORIT & RIWAYAT ---
             else if(currentTab === 'favorites' || currentTab === 'history') {
                 const key = currentTab === 'favorites' ? 'db_favs' : 'db_history';
                 const data = Object.values(getLS(key)).sort((a,b) => b.timestamp - a.timestamp);
-                
                 app.innerHTML = `<h2 class="text-xl font-bold text-white mb-6 capitalize">${currentTab === 'favorites' ? 'Favorit Saya' : 'Riwayat Tontonan'}</h2>`;
-                
-                if(data.length === 0) {
-                    app.innerHTML += `
-                        <div class="text-center py-20 text-gray-500 flex flex-col items-center animate-fade-in">
-                            <i class="fas fa-ghost text-4xl mb-2 opacity-50"></i>
-                            <p>Belum ada data.</p>
-                            <button onclick="switchTab('home')" class="mt-4 px-4 py-2 bg-zinc-800 rounded-full text-xs text-white">Mulai Nonton</button>
-                        </div>`;
-                } else {
+                if(data.length === 0) app.innerHTML += '<div class="text-center py-20 text-gray-500 flex flex-col items-center"><i class="fas fa-ghost text-4xl mb-2 opacity-50"></i><p>Belum ada data.</p></div>';
+                else {
                     app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
                 }
             }
-            // 3. TAB AKUN
+            // --- TAB AKUN ---
             else {
-                app.innerHTML = `
-                    <div class="text-center py-20 text-gray-400 animate-fade-in">
-                        <i class="fas fa-user-circle text-6xl mb-4 text-zinc-700"></i>
-                        <h2 class="text-xl font-bold text-white">Pengguna Tamu</h2>
-                        <p class="text-sm mt-2 text-gray-500">Data tersimpan di browser ini.</p>
-                        <button onclick="if(confirm('Hapus semua data riwayat & favorit?')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-red-900/20 border border-red-900/50 rounded-lg text-red-500 text-sm hover:bg-red-900/40 transition">
-                            <i class="fas fa-trash mr-2"></i> Hapus Data
-                        </button>
-                    </div>`;
+                app.innerHTML = `<div class="text-center py-20 text-gray-400 animate-fade-in"><i class="fas fa-user-circle text-5xl mb-4"></i><br><h2 class="text-xl font-bold text-white">Pengguna Tamu</h2><p class="text-sm mt-2">Data tersimpan di browser ini.</p><button onclick="if(confirm('Hapus semua data?')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-zinc-800 rounded-full text-red-500 text-sm border border-zinc-700">Reset Data</button></div>`;
             }
         }
 
-        // Fungsi membuat Card Drama
+        // FUNGSI MEMBUAT KARTU DRAMA
         function createCard(b, isHistory=false) {
-            // URL menuju Player
+            // URL Langsung (Browser akan reload ke halaman ini)
+            // File _redirects akan menangani ini dan menyajikan player/index.html
             let url = `/player/${b.id}/1`;
-            // Jika di history, lanjut ke episode terakhir
-            if(isHistory && b.lastEpisode) {
-                url = `/player/${b.id}/${b.lastEpisode}`;
-            }
+            if(isHistory && b.lastEpisode) url = `/player/${b.id}/${b.lastEpisode}`;
             
-            // PENTING: Gunakan tag <a> biasa TANPA onclick handler khusus
-            // Ini akan memaksa browser memuat ulang halaman baru (player/index.html)
+            // PENTING: Tidak ada onclick="navigate()"! Biarkan ini menjadi link normal.
             return `
             <a href="${url}" class="block group relative transition transform active:scale-95">
                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
                     <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
-                    
-                    <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow">
-                        ${b.episodes||'?'} Eps
-                    </div>
-                    
-                    ${isHistory ? `
-                    <div class="absolute bottom-0 left-0 w-full h-1 bg-gray-700">
-                        <div class="bg-red-600 h-full" style="width: ${(b.lastEpisode/(parseInt(b.episodes)||100))*100}%"></div>
-                    </div>` : ''}
+                    <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes||'?'} Eps</div>
+                    ${isHistory ? `<div class="absolute bottom-0 left-0 w-full h-1 bg-gray-700"><div class="bg-red-600 h-full" style="width: ${(b.lastEpisode/(parseInt(b.episodes)||100))*100}%"></div></div>` : ''}
                 </div>
-                <h3 class="text-xs font-medium text-gray-300 line-clamp-2 group-hover:text-white leading-tight">${b.title}</h3>
-                ${isHistory ? `<p class="text-[10px] text-red-500 mt-0.5">Lanjut Eps ${b.lastEpisode}</p>` : ''}
+                <h3 class="text-xs font-medium text-gray-300 line-clamp-2 group-hover:text-white">${b.title}</h3>
             </a>`;
         }
 
@@ -171,14 +137,12 @@
                     const res = await fetch(`${API}?type=search&keyword=${encodeURIComponent(q)}`);
                     const json = await res.json();
                     homeData = json.sections; 
-                    switchTab('home'); // Kembali ke tab home untuk menampilkan hasil
-                } catch(e){ 
-                    app.innerHTML='<div class="text-center py-20 text-red-500">Pencarian gagal.</div>';
-                }
+                    switchTab('home');
+                } catch(e){ app.innerHTML='<div class="text-center py-20 text-red-500">Gagal mencari.</div>';}
             }
         });
 
-        // Init Render
+        // Render Awal
         render();
     </script>
 </body>
