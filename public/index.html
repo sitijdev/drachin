@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Dramabox Unofficial</title>
-    <meta name="description" content="Nonton drama pendek sub Indo gratis.">
-    <meta name="theme-color" content="#0f0f0f">
+    <meta name="description" content="Nonton drama pendek sub Indo gratis." />
+    <meta name="theme-color" content="#0f0f0f" />
 
-    <!-- player-loader eksternal (mengganti handler inline sebelumnya) -->
+    <!-- player-loader eksternal (meng-handle /player/* injection) -->
     <script src="/player-loader.js" defer></script>
 
+    <!-- Tailwind CDN (dev). Untuk produksi: build Tailwind dan gunakan CSS statis -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
     <style>
         body { background-color: #0f0f0f; color: #e5e5e5; font-family: sans-serif; -webkit-tap-highlight-color: transparent; }
         .hide-scroll::-webkit-scrollbar { display: none; }
@@ -20,9 +22,9 @@
         .glass-bottom { background: rgba(0, 0, 0, 0.95); border-top: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
         .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-        /* Animasi Skeleton */
         .skeleton { background: linear-gradient(90deg, #1f1f1f 25%, #2a2a2a 50%, #1f1f1f 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .lang-select { background: rgba(255,255,255,0.03); border-radius: 9999px; padding: 6px 10px; color: #e5e5e5; border: 1px solid rgba(255,255,255,0.04); }
     </style>
 </head>
 <body class="min-h-screen flex flex-col pb-24">
@@ -34,10 +36,22 @@
                 <span class="font-bold text-lg tracking-wide hidden sm:block">DRAMABOX</span>
             </a>
         </div>
-        <div class="relative">
-            <input type="text" id="search-input" placeholder="Cari drama..." 
-                class="bg-zinc-800/80 border border-zinc-700/50 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 transition w-36 sm:w-56 text-white placeholder-gray-500">
-            <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs pointer-events-none"></i>
+
+        <div class="flex items-center gap-3">
+            <div class="relative">
+                <input type="text" id="search-input" placeholder="Cari drama..." 
+                    class="bg-zinc-800/80 border border-zinc-700/50 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 transition w-36 sm:w-56 text-white placeholder-gray-500">
+                <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs pointer-events-none"></i>
+            </div>
+
+            <!-- Language selector -->
+            <select id="lang-select" class="lang-select text-sm" aria-label="Pilih bahasa">
+                <option value="id">Bahasa (ID)</option>
+                <option value="en">English</option>
+                <option value="ms">Bahasa Melayu</option>
+                <option value="zh">中文</option>
+                <option value="es">Español</option>
+            </select>
         </div>
     </nav>
 
@@ -45,25 +59,172 @@
 
     <nav class="fixed bottom-0 w-full glass-bottom z-50 h-16 pb-safe">
         <div class="max-w-lg mx-auto h-full flex justify-around items-center px-2">
-            <button onclick="switchTab('home')" class="nav-btn w-16 text-red-500" id="tab-home">
-                <i class="fas fa-home text-xl mb-1"></i><br><span class="text-[10px]">Beranda</span>
+            <button data-tab="home" class="nav-btn w-16 text-red-500" id="tab-home">
+                <i class="fas fa-home text-xl mb-1"></i><br><span class="text-[10px]" data-i18n="tab_home">Beranda</span>
             </button>
-            <button onclick="switchTab('favorites')" class="nav-btn w-16 text-gray-500" id="tab-favorites">
-                <i class="fas fa-heart text-xl mb-1"></i><br><span class="text-[10px]">Favorit</span>
+            <button data-tab="favorites" class="nav-btn w-16 text-gray-500" id="tab-favorites">
+                <i class="fas fa-heart text-xl mb-1"></i><br><span class="text-[10px]" data-i18n="tab_favorites">Favorit</span>
             </button>
-            <button onclick="switchTab('history')" class="nav-btn w-16 text-gray-500" id="tab-history">
-                <i class="fas fa-clock-rotate-left text-xl mb-1"></i><br><span class="text-[10px]">Riwayat</span>
+            <button data-tab="history" class="nav-btn w-16 text-gray-500" id="tab-history">
+                <i class="fas fa-clock-rotate-left text-xl mb-1"></i><br><span class="text-[10px]" data-i18n="tab_history">Riwayat</span>
             </button>
-            <button onclick="switchTab('account')" class="nav-btn w-16 text-gray-500" id="tab-account">
-                <i class="fas fa-user text-xl mb-1"></i><br><span class="text-[10px]">Akun</span>
+            <button data-tab="account" class="nav-btn w-16 text-gray-500" id="tab-account">
+                <i class="fas fa-user text-xl mb-1"></i><br><span class="text-[10px]" data-i18n="tab_account">Akun</span>
             </button>
         </div>
     </nav>
 
     <script>
+        // Simple client-side i18n for frontend labels and API language passthrough
+        const LANG_KEY = 'drama_lang';
+        const DEFAULT_LANG = 'id';
+
+        const TRANSLATIONS = {
+            id: {
+                search_placeholder: 'Cari drama...',
+                tab_home: 'Beranda',
+                tab_favorites: 'Favorit',
+                tab_history: 'Riwayat',
+                tab_account: 'Akun',
+                favorites_title: 'Favorit Saya',
+                history_title: 'Riwayat Tontonan',
+                no_data: 'Belum ada data.',
+                start_watch: 'Mulai Nonton',
+                account_guest: 'Pengguna Tamu',
+                account_sub: 'Data tersimpan di browser ini.',
+                delete_confirm: 'Hapus semua data?',
+                delete_btn: 'Hapus Data',
+                load_failed: 'Gagal memuat data.',
+                search_failed: 'Gagal mencari.',
+                loading: 'Memuat...'
+            },
+            en: {
+                search_placeholder: 'Search dramas...',
+                tab_home: 'Home',
+                tab_favorites: 'Favorites',
+                tab_history: 'History',
+                tab_account: 'Account',
+                favorites_title: 'My Favorites',
+                history_title: 'Watch History',
+                no_data: 'No data yet.',
+                start_watch: 'Start Watching',
+                account_guest: 'Guest User',
+                account_sub: 'Data is stored in this browser.',
+                delete_confirm: 'Delete all data?',
+                delete_btn: 'Delete Data',
+                load_failed: 'Failed to load data.',
+                search_failed: 'Search failed.',
+                loading: 'Loading...'
+            },
+            ms: {
+                search_placeholder: 'Cari drama...',
+                tab_home: 'Laman Utama',
+                tab_favorites: 'Kegemaran',
+                tab_history: 'Sejarah',
+                tab_account: 'Akaun',
+                favorites_title: 'Kegemaran Saya',
+                history_title: 'Sejarah Tontonan',
+                no_data: 'Tiada data.',
+                start_watch: 'Mula Menonton',
+                account_guest: 'Pengguna Tetamu',
+                account_sub: 'Data disimpan di pelayar ini.',
+                delete_confirm: 'Padam semua data?',
+                delete_btn: 'Padam Data',
+                load_failed: 'Gagal memuat data.',
+                search_failed: 'Gagal mencari.',
+                loading: 'Memuat...'
+            },
+            zh: {
+                search_placeholder: '搜索剧集...',
+                tab_home: '首页',
+                tab_favorites: '收藏',
+                tab_history: '历史',
+                tab_account: '账号',
+                favorites_title: '我的收藏',
+                history_title: '观看历史',
+                no_data: '暂无数据。',
+                start_watch: '开始观看',
+                account_guest: '游客用户',
+                account_sub: '数据保存在此浏览器中。',
+                delete_confirm: '删除所有数据？',
+                delete_btn: '删除数据',
+                load_failed: '加载失败。',
+                search_failed: '搜索失败。',
+                loading: '加载中...'
+            },
+            es: {
+                search_placeholder: 'Buscar dramas...',
+                tab_home: 'Inicio',
+                tab_favorites: 'Favoritos',
+                tab_history: 'Historial',
+                tab_account: 'Cuenta',
+                favorites_title: 'Mis Favoritos',
+                history_title: 'Historial de Visualización',
+                no_data: 'Sin datos aún.',
+                start_watch: 'Comenzar a ver',
+                account_guest: 'Usuario Invitado',
+                account_sub: 'Los datos se guardan en este navegador.',
+                delete_confirm: '¿Eliminar todos los datos?',
+                delete_btn: 'Eliminar datos',
+                load_failed: 'Error al cargar datos.',
+                search_failed: 'Error en la búsqueda.',
+                loading: 'Cargando...'
+            }
+        };
+
         const API = "/api/data";
         let currentTab = 'home';
         let homeData = null;
+
+        function getSavedLang() {
+            return localStorage.getItem(LANG_KEY) || DEFAULT_LANG;
+        }
+        function setSavedLang(l) {
+            localStorage.setItem(LANG_KEY, l);
+        }
+
+        // translator helper
+        function t(key) {
+            const lang = getSavedLang();
+            const dict = TRANSLATIONS[lang] || TRANSLATIONS[DEFAULT_LANG];
+            return dict[key] || TRANSLATIONS[DEFAULT_LANG][key] || key;
+        }
+
+        // apply translations for static UI elements (nav labels, placeholder)
+        function applyStaticTranslations() {
+            // placeholder
+            const si = document.getElementById('search-input');
+            if (si) si.placeholder = t('search_placeholder');
+
+            // bottom tab labels
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const k = el.getAttribute('data-i18n');
+                if (k) el.innerText = t(k);
+            });
+        }
+
+        // set html lang attribute and UI lang selector
+        function applyLangUI() {
+            const lang = getSavedLang();
+            document.documentElement.lang = lang;
+            const select = document.getElementById('lang-select');
+            if (select) select.value = lang;
+            applyStaticTranslations();
+            // reset homeData when language changes (so new language content fetched)
+            homeData = null;
+        }
+
+        document.getElementById('lang-select').addEventListener('change', (e) => {
+            setSavedLang(e.target.value);
+            applyLangUI();
+            // If currently on home tab, re-render to load content in new language
+            if (currentTab === 'home') {
+                render();
+            }
+        });
+
+        // initialize lang UI on load
+        applyLangUI();
 
         const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
 
@@ -71,16 +232,27 @@
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('.nav-btn').forEach(b => {
-                const isActive = b.id === `tab-${tab}`;
+                const isActive = b.getAttribute('data-tab') === tab;
                 b.className = `nav-btn w-16 ${isActive ? 'text-red-500' : 'text-gray-500'}`;
             });
             render();
         }
 
+        // Attach nav-bottom button behavior (prevents inline onclick conflicts)
+        document.querySelectorAll('.nav-btn').forEach(b => {
+            b.addEventListener('click', (e) => {
+                const tab = b.getAttribute('data-tab');
+                if (tab) {
+                    switchTab(tab);
+                }
+            });
+        });
+
         // FUNGSI RENDER UTAMA
         async function render() {
             const app = document.getElementById('app');
             app.innerHTML = '';
+            const lang = getSavedLang();
             
             // --- TAB HOME ---
             if(currentTab === 'home') {
@@ -97,12 +269,13 @@
                         </div>`;
                     
                     try {
-                        const res = await fetch(`${API}?type=list`);
+                        const res = await fetch(`${API}?type=list&lang=${encodeURIComponent(lang)}`);
+                        if (!res.ok) throw new Error(t('load_failed'));
                         const json = await res.json();
                         homeData = json.sections;
                         render(); 
                     } catch(e) { 
-                        app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat data.</div>'; 
+                        app.innerHTML = `<div class="text-center py-20 text-red-500">${t('load_failed')}</div>`; 
                     }
                     return;
                 }
@@ -119,7 +292,7 @@
                             </section>`;
                     });
                 } else {
-                    app.innerHTML = '<div class="text-center py-20 text-gray-500">Tidak ada data drama.</div>';
+                    app.innerHTML = `<div class="text-center py-20 text-gray-500">${t('no_data')}</div>`;
                 }
             } 
             
@@ -127,14 +300,14 @@
             else if(currentTab === 'favorites' || currentTab === 'history') {
                 const key = currentTab === 'favorites' ? 'db_favs' : 'db_history';
                 const data = Object.values(getLS(key)).sort((a,b) => b.timestamp - a.timestamp);
-                app.innerHTML = `<h2 class="text-xl font-bold text-white mb-6 capitalize">${currentTab === 'favorites' ? 'Favorit Saya' : 'Riwayat Tontonan'}</h2>`;
+                app.innerHTML = `<h2 class="text-xl font-bold text-white mb-6 capitalize">${currentTab === 'favorites' ? t('favorites_title') : t('history_title')}</h2>`;
                 
                 if(data.length === 0) {
                     app.innerHTML += `
                         <div class="text-center py-20 text-gray-500 flex flex-col items-center">
                             <i class="fas fa-ghost text-4xl mb-2 opacity-50"></i>
-                            <p>Belum ada data.</p>
-                            <button onclick="switchTab('home')" class="mt-4 px-4 py-2 bg-zinc-800 rounded-full text-xs text-white">Mulai Nonton</button>
+                            <p>${t('no_data')}</p>
+                            <button onclick="switchTab('home')" class="mt-4 px-4 py-2 bg-zinc-800 rounded-full text-xs text-white">${t('start_watch')}</button>
                         </div>`;
                 } else {
                     app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
@@ -146,10 +319,10 @@
                 app.innerHTML = `
                     <div class="text-center py-20 text-gray-400 animate-fade-in">
                         <i class="fas fa-user-circle text-6xl mb-4 text-zinc-700"></i>
-                        <h2 class="text-xl font-bold text-white">Pengguna Tamu</h2>
-                        <p class="text-sm mt-2 text-gray-500">Data tersimpan di browser ini.</p>
-                        <button onclick="if(confirm('Hapus semua data?')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-red-900/20 border border-red-900/50 rounded-lg text-red-500 text-sm hover:bg-red-900/40 transition">
-                            <i class="fas fa-trash mr-2"></i> Hapus Data
+                        <h2 class="text-xl font-bold text-white">${t('account_guest')}</h2>
+                        <p class="text-sm mt-2 text-gray-500">${t('account_sub')}</p>
+                        <button onclick="if(confirm('${t('delete_confirm')}')){localStorage.clear();location.reload()}" class="mt-8 px-6 py-2 bg-red-900/20 border border-red-900/50 rounded-lg text-red-500 text-sm hover:bg-red-900/40 transition">
+                            <i class="fas fa-trash mr-2"></i> ${t('delete_btn')}
                         </button>
                     </div>`;
             }
@@ -157,12 +330,12 @@
 
         // FUNGSI MEMBUAT KARTU (LINK SEO FRIENDLY)
         function createCard(b, isHistory=false) {
-            // Tentukan episode target: kalau ada history pakai lastEpisode, kalau tidak pakai 1
             let targetEp = 1;
             if (isHistory && b.lastEpisode) targetEp = b.lastEpisode;
 
-            // Format URL: /player/BOOKID-CHAPTERID (Contoh: /player/1005-3)
-            const url = `/player/${b.id}-${targetEp}`;
+            // include lang param in player link so player can read language preference too
+            const lang = getSavedLang();
+            const url = `/player/${b.id}-${targetEp}?lang=${encodeURIComponent(lang)}`;
             
             return `
             <a href="${url}" class="block group relative transition transform active:scale-95">
@@ -175,22 +348,30 @@
             </a>`;
         }
 
-        // Search Logic
+        // Search Logic (Enter key)
         document.getElementById('search-input').addEventListener('keypress', async (e) => {
             if(e.key === 'Enter') {
                 const q = e.target.value;
                 const app = document.getElementById('app');
-                app.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fas fa-circle-notch fa-spin"></i> Mencari...</div>';
+                app.innerHTML = `<div class="text-center py-20 text-gray-500"><i class="fas fa-circle-notch fa-spin"></i> ${t('loading')}</div>`;
                 try {
-                    const res = await fetch(`${API}?type=search&keyword=${encodeURIComponent(q)}`);
+                    const lang = getSavedLang();
+                    const res = await fetch(`${API}?type=search&keyword=${encodeURIComponent(q)}&lang=${encodeURIComponent(lang)}`);
+                    if (!res.ok) throw new Error(t('search_failed'));
                     const json = await res.json();
                     homeData = json.sections; 
                     switchTab('home'); 
-                } catch(e){ app.innerHTML='<div class="text-center py-20 text-red-500">Gagal mencari.</div>';}
+                } catch(e){ app.innerHTML=`<div class="text-center py-20 text-red-500">${t('search_failed')}</div>`;}
             }
         });
 
+        // initial render and apply translations (call after script loaded)
+        applyLangUI();
         render();
+
+        // expose few helpers for loader or other scripts
+        try { if (typeof window !== 'undefined') { window.getSavedLang = getSavedLang; } } catch(e){}
+
     </script>
 </body>
 </html>
