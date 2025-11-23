@@ -1,7 +1,6 @@
 // functions/api/data.js
 
-// --- KONFIGURASI KUNCI RSA (Dari Repositori PHP) ---
-// Isi file private_key.pem
+// --- 1. KONFIGURASI KUNCI RSA (Wajib ada untuk signing) ---
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
 nbY3irfKdkEllAU2OORnAjlXDyCzcm2Z6ZRrGvtTZUAMelfU5PWS6XGEm3d4kJEK
@@ -31,6 +30,12 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
+// --- 2. MANUAL TOKEN (OPSIONAL) ---
+// Jika API Vercel mati ("Gagal ambil token"), isi token & deviceId dari hasil sniff HP Anda di sini.
+// Jika dibiarkan kosong (""), script akan mencoba mengambil otomatis.
+const MANUAL_TOKEN = ""; 
+const MANUAL_DEVICE_ID = ""; // Contoh: "ffffffff-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
 export async function onRequest(context) {
   try {
     const { request, env } = context;
@@ -38,37 +43,37 @@ export async function onRequest(context) {
     const type = url.searchParams.get("type");
     const bookId = url.searchParams.get("bookId");
 
-    // 1. LIST DRAMA
+    // --- A. LIST DRAMA ---
     if (type === "list") {
-      // Menggunakan Endpoint Home Classify dari repo PHP (test.php)
-      // Karena repo PHP sign request, kita juga akan sign.
+      // KEMBALI KE ENDPOINT NODE.JS agar cocok dengan frontend (columnVoList)
+      // Tapi requestnya tetap kita SIGN pakai Private Key PHP biar lebih valid.
       const payload = {
-          pageSize: 15,
-          typeList: [
-            { type: 1, value: "" }, { type: 2, value: "" }, 
-            { type: 4, value: "" }, { type: 5, value: "2" }
-          ],
-          pageNo: 1,
-          showLabels: false
+        isNeedRank: 1,
+        index: 0,
+        type: 0,
+        channelId: 175
       };
       
-      const data = await fetchFromDramaBox("/drama-box/home/classify", payload, env);
+      const data = await fetchFromDramaBox("/drama-box/he001/theater", payload, env);
       return jsonResponse(data);
     }
 
-    // 2. DETAIL CHAPTER (Tiered Storage: KV -> D1 -> API)
+    // --- B. DETAIL CHAPTER (Tiered Storage) ---
     if (type === "chapter" && bookId) {
       const cacheKey = `chapter_list_${bookId}`;
 
-      // Cek KV
+      // 1. Cek KV (Cache)
       if (env.DRAMABOX_CACHE) {
         const cachedKV = await env.DRAMABOX_CACHE.get(cacheKey);
         if (cachedKV) return jsonResponse(JSON.parse(cachedKV), "KV-Cache");
       }
 
-      // Cek D1
+      // 2. Cek DB (D1)
       if (env.DB) {
-        const dbResult = await env.DB.prepare("SELECT * FROM chapters WHERE book_id = ? ORDER BY episode_number ASC").bind(bookId).all();
+        const dbResult = await env.DB.prepare(
+            "SELECT * FROM chapters WHERE book_id = ? ORDER BY episode_number ASC"
+        ).bind(bookId).all();
+
         if (dbResult.results && dbResult.results.length > 0) {
           const formattedData = { 
             data: { chapterList: dbResult.results.map(row => ({
@@ -76,13 +81,12 @@ export async function onRequest(context) {
                 cdnList: [{ videoPathList: [{ videoPath: row.video_url, isDefault: 1 }] }]
             }))} 
           };
-          // Refresh KV
           if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(formattedData), { expirationTtl: 14400 }));
           return jsonResponse(formattedData, "D1-Database");
         }
       }
 
-      // Fetch API (Dengan Signature Lokal)
+      // 3. Fetch API (Signed)
       const payload = {
           boundaryIndex: 0, comingPlaySectionId: -1, index: 1,
           currencyPlaySource: "discover_new_rec_new", needEndRecommend: 0,
@@ -103,13 +107,106 @@ export async function onRequest(context) {
     return new Response("Invalid Parameters", { status: 400 });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Error", message: err.message, stack: err.stack }, null, 2), { status: 500 });
+    // Tampilkan error JSON yang rapi
+    return new Response(JSON.stringify({ 
+        error: "Internal Server Error", 
+        message: err.message, 
+        stack: err.stack 
+    }, null, 2), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
 
-// --- HELPER SIGNATURE (PORTING DARI PHP) ---
+// --- HELPER FUNCTIONS ---
 
-// 1. Convert PEM string to Binary Key
+// 1. Logic Request ke API Utama dengan Signing
+async function fetchFromDramaBox(endpoint, payload, env) {
+  // Ambil token (Otomatis atau Manual)
+  const { token, deviceId } = await getTokenAndDevice(env);
+  
+  // Buat Signature Lokal (PHP Logic ported to JS)
+  const signature = await createSignature(payload, token, deviceId);
+  
+  const headers = {
+    "Host": "sapi.dramaboxdb.com",
+    "Tn": `Bearer ${token}`,
+    "Version": "451", // Versi app terbaru
+    "Package-Name": "com.storymatrix.drama",
+    "Device-Id": deviceId,
+    "Userid": "289167621",
+    "Android-Id": "ANDROID", 
+    "Content-Type": "application/json; charset=UTF-8",
+    "User-Agent": "okhttp/4.10.0",
+    "sn": signature, // Signature buatan sendiri
+    "Language": "in",
+    "Current-Language": "in"
+  };
+
+  const url = `https://sapi.dramaboxdb.com${endpoint}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: headers,
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Dramabox API Error: ${res.status} - ${txt}`);
+  }
+  return await res.json();
+}
+
+// 2. Logic Ambil Token (Prioritas: Manual -> Cache -> Vercel API)
+async function getTokenAndDevice(env) {
+    // A. Cek jika user mengisi Manual Token di atas
+    if (MANUAL_TOKEN && MANUAL_DEVICE_ID) {
+        return { token: MANUAL_TOKEN, deviceId: MANUAL_DEVICE_ID };
+    }
+
+    // B. Cek Cache KV
+    if (env.DRAMABOX_CACHE) {
+        const cached = await env.DRAMABOX_CACHE.get("app_token", { type: "json" });
+        if (cached) return cached;
+    }
+
+    // C. Cek External API (Vercel)
+    try {
+        const res = await fetch("https://dramabox-api.vercel.app/api/token", {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+        });
+        
+        if (!res.ok) throw new Error(`Vercel API Down: ${res.status}`);
+        
+        const json = await res.json();
+        if (!json.data || !json.data.token) throw new Error("Format Token Vercel Invalid");
+
+        const data = { token: json.data.token, deviceId: json.data.deviceId };
+        
+        // Simpan Cache
+        if (env.DRAMABOX_CACHE) {
+            await env.DRAMABOX_CACHE.put("app_token", JSON.stringify(data), { expirationTtl: 3000 });
+        }
+        return data;
+
+    } catch (e) {
+        // Jika gagal, lempar error agar user tau harus isi manual
+        throw new Error(`Gagal ambil token otomatis (Coba isi MANUAL_TOKEN di script): ${e.message}`);
+    }
+}
+
+// 3. Logic Signature (RSA Signing)
+async function createSignature(payload, token, deviceId) {
+    const androidId = "ANDROID";
+    const bodyJson = JSON.stringify(payload); 
+    const toSignString = bodyJson + deviceId + androidId + "Bearer " + token;
+    
+    const encoder = new TextEncoder();
+    const data = encoder.encode(toSignString);
+    const key = await importPrivateKey(PRIVATE_KEY_PEM);
+    
+    const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
+    return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
+}
+
 function importPrivateKey(pem) {
   const binaryDerString = atob(pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\n/g, "").replace(/\s/g, ""));
   const binaryDer = new Uint8Array(binaryDerString.length);
@@ -125,85 +222,9 @@ function importPrivateKey(pem) {
   );
 }
 
-// 2. Create Signature (Logika DramaboxApp.php)
-async function createSignature(payload, token, deviceId) {
-    const androidId = "ANDROID"; // Default static value dari repo PHP
-    // Rumus dari PHP: $toSign = $bodyJson . DRBX_DEVICE . DRBX_ANDROID . DRBX_BEARER;
-    // JS JSON.stringify hampir selalu sama dengan json_encode PHP (no escape slashes)
-    const bodyJson = JSON.stringify(payload); 
-    const toSignString = bodyJson + deviceId + androidId + "Bearer " + token;
-    
-    const encoder = new TextEncoder();
-    const data = encoder.encode(toSignString);
-    const key = await importPrivateKey(PRIVATE_KEY_PEM);
-    
-    const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
-    
-    // Convert buffer to Base64
-    return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-}
-
-// --- REQUEST HANDLER ---
-
-async function fetchFromDramaBox(endpoint, payload, env) {
-  // 1. Dapatkan Token & DeviceID (Masih pinjam dari helper Vercel agar dinamis, atau bisa hardcode jika mau)
-  const { token, deviceId } = await getTokenAndDevice(env);
-  
-  // 2. Generate Signature Sendiri (INI BAGIAN BARUNYA)
-  const signature = await createSignature(payload, token, deviceId);
-  
-  // 3. Susun Headers (Gabungan PHP & Node.js Repo)
-  const headers = {
-    "Host": "sapi.dramaboxdb.com",
-    "Tn": `Bearer ${token}`, // Dari PHP DRBX_BEARER
-    "Version": "451",        // Update ke 451 sesuai repo PHP
-    "Package-Name": "com.storymatrix.drama",
-    "Device-Id": deviceId,
-    "Userid": "289167621",
-    "Android-Id": "ANDROID", // Header tambahan dari PHP
-    "Content-Type": "application/json; charset=UTF-8",
-    "User-Agent": "okhttp/4.10.0",
-    "sn": signature,         // Header Signature hasil generate sendiri!
-    "Language": "in",
-    "Current-Language": "in"
-  };
-
-  const url = `https://sapi.dramaboxdb.com${endpoint}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) throw new Error(`API Error: ${res.status}`);
-  return await res.json();
-}
-
-async function getTokenAndDevice(env) {
-    // Coba cache dulu
-    if (env.DRAMABOX_CACHE) {
-        const cached = await env.DRAMABOX_CACHE.get("app_token", { type: "json" });
-        if (cached) return cached;
-    }
-
-    // Fallback: Ambil dari Vercel helper (Gugun09), tapi kita Sign sendiri nanti
-    const res = await fetch("https://dramabox-api.vercel.app/api/token");
-    const json = await res.json();
-    if (!json.data) throw new Error("Gagal ambil token");
-
-    const data = { token: json.data.token, deviceId: json.data.deviceId };
-    
-    if (env.DRAMABOX_CACHE) {
-        await env.DRAMABOX_CACHE.put("app_token", JSON.stringify(data), { expirationTtl: 3000 });
-    }
-    return data;
-}
-
-// --- DB HELPER (Sama seperti sebelumnya) ---
+// 4. Logic Save DB
 async function saveToD1(db, bookId, data) {
-    // ... (Logika simpan DB sama persis dengan sebelumnya) ...
-    // Copy function saveToD1 dari jawaban sebelumnya ke sini
-     const chapters = data.data.chapterList;
+    const chapters = data.data.chapterList;
     const now = Date.now();
     await db.prepare(`INSERT OR REPLACE INTO books (book_id, updated_at) VALUES (?, ?)`).bind(bookId, now).run();
     const stmt = db.prepare(`INSERT OR IGNORE INTO chapters (chapter_id, book_id, title, video_url, episode_number, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
