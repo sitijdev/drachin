@@ -1,5 +1,5 @@
 // ============================================================================
-// 1. KONFIGURASI KREDENSIAL & KUNCI
+// 1. KONFIGURASI
 // ============================================================================
 
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
@@ -31,19 +31,12 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-// KREDENSIAL (Ganti dengan hasil Packet Capture terbaru jika expired)
 const MANUAL_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnlaV2RwYzNSbGNsUjVjR1VpT2lKVVJVMVFJaXdpZFhObGNrbGtJam96TXpZd09EUXdOVFo5LkFLMWw0d01Ud00xVndOTHBOeUlOcmtHN3dmb0czaGROMEgxNWVPZV9KaHc=";
 const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
 const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
 const MANUAL_USER_ID = "336084056";
-
-// TRIK 1: Downgrade versi Header agar cocok dengan Private Key (Wajib!)
 const FAKE_APP_VERSION = "451"; 
 const FAKE_VN_VERSION = "4.5.1";
-
-// ============================================================================
-// 2. ROUTER HANDLER
-// ============================================================================
 
 export async function onRequest(context) {
   try {
@@ -52,125 +45,70 @@ export async function onRequest(context) {
     const type = url.searchParams.get("type");
     const bookId = url.searchParams.get("bookId");
     const keyword = url.searchParams.get("keyword");
-    
-    // URL dinamis untuk fetch series.json (public)
     const SERIES_JSON_URL = `${url.origin}/series.json`;
 
-    // --- A. SEARCH (Pencarian) ---
+    // --- A. SEARCH ---
     if (type === "search" && keyword) {
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
       const localResults = localData.filter(b => 
         b.title.toLowerCase().includes(keyword.toLowerCase())
       ).map(mapLocalBook);
-
-      // Cari di API Dramabox juga
-      const payload = {
-        searchSource: "搜索按钮", pageNo: 1, pageSize: 20, from: "search_sug", keyword: keyword
-      };
-      const rawData = await fetchFromDramaBox("/drama-box/search/search", payload);
-      const apiResults = (rawData.data?.searchList || []).map(item => ({
-          id: item.bookId || item.id,
-          title: item.bookName || item.title,
-          cover: item.cover || item.bookCover,
-          episodes: item.chapterCount || "?",
-          desc: item.introduction || "Hasil pencarian",
-          tags: item.tags || []
-      }));
-
-      const combined = [...localResults, ...apiResults];
-      const unique = combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
-
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH-HYBRID");
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: localResults }] }, "SEARCH");
     }
 
-    // --- B. LIST DRAMA (HOME) ---
+    // --- B. LIST (HOME) ---
     if (type === "list") {
-      const combinedSections = [];
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
+      const combinedSections = [];
       
-      if (localData && localData.length > 0) {
-          combinedSections.push({
-              title: "🔥 Pilihan Editor (Full Unlocked)",
-              books: localData.slice(0, 15).map(mapLocalBook)
-          });
-          if(localData.length > 15) {
-              combinedSections.push({
-                  title: "📺 Rekomendasi Spesial",
-                  books: localData.slice(15, 35).map(mapLocalBook)
-              });
-          }
-          if(localData.length > 35) {
-              combinedSections.push({
-                  title: "✨ Koleksi Populer",
-                  books: localData.slice(35, 100).map(mapLocalBook)
-              });
-          }
+      if (localData.length > 0) {
+          combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0, 15).map(mapLocalBook) });
+          if(localData.length > 15) combinedSections.push({ title: "📺 Rekomendasi Spesial", books: localData.slice(15, 35).map(mapLocalBook) });
+          if(localData.length > 35) combinedSections.push({ title: "✨ Koleksi Populer", books: localData.slice(35, 100).map(mapLocalBook) });
       }
-      // Kita tidak pakai API Home live karena sering kosong/error, fokus ke series.json saja dulu
-      return jsonResponse({ sections: combinedSections }, "LIST-LOCAL");
+      return jsonResponse({ sections: combinedSections }, "LIST");
     }
 
-    // --- C. DETAIL & CHAPTER (TRIK RAHASIA WEBFIC + UNLOCKER) ---
+    // --- C. DETAIL & CHAPTER (UNLOCKER SYSTEM) ---
     if (type === "chapter" && bookId) {
-      const cacheKey = `unlock_webfic_${bookId}`;
-
-      // 1. Cek Cache KV
+      const cacheKey = `unlock_wfc_${bookId}`;
       if (env.DRAMABOX_CACHE) {
         const cached = await env.DRAMABOX_CACHE.get(cacheKey);
-        if (cached) return jsonResponse(JSON.parse(cached), "KV-CACHE");
+        if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
       }
 
-      // 2. TRIK 2: Ambil Data dari Webfic (Bukan Dramabox!)
-      // Webfic lebih stabil untuk list chapter dan tidak dikunci login
-      const webficUrl = `https://www.webfic.com/webfic/book/detail/v2?id=${bookId}&tlanguage=in`;
-      const webficRes = await fetch(webficUrl);
-      
-      if (!webficRes.ok) {
-          return jsonResponse({ error: "Gagal menghubungi server Webfic." }, "WEBFIC-ERROR");
-      }
-
+      // 1. Ambil Data dari Webfic (Mirror yang lebih stabil)
+      const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${bookId}&tlanguage=in`);
+      if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data Webfic" }, "ERR");
       const webficData = await webficRes.json();
-      const chapterList = webficData.data?.chapterList;
+      const chapterList = webficData.data?.chapterList || [];
 
-      if (!chapterList || chapterList.length === 0) {
-          // Jika Webfic gagal, coba fallback ke Dramabox biasa (jarang berhasil kalau non-VIP)
-          return jsonResponse({ error: "Drama tidak ditemukan atau terkunci." }, "NO-CHAPTERS");
-      }
+      if (chapterList.length === 0) return jsonResponse({ error: "Chapter tidak ditemukan" }, "ERR");
 
-      // 3. Kumpulkan ID Chapter
+      // 2. Ambil Link Video dari Dramabox (Batch Download)
       const allChapterIds = chapterList.map(ch => ch.id);
-
-      // 4. TRIK 3: Tembak Endpoint "BATCH DOWNLOAD" Dramabox
-      // Ini rahasianya: Endpoint ini sering memberikan link video tanpa cek VIP ketat
-      const unlockPayload = {
+      const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", {
           bookId: bookId,
           chapterIdList: allChapterIds
-      };
-      const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", unlockPayload);
+      });
 
-      // 5. Gabungkan Data (Nama dari Webfic + Video dari Dramabox)
-      const finalChapters = [];
+      // 3. Mapping Video
       const videoMap = {};
-
-      // Mapping Link Video dari hasil unlock
       if (unlockData?.data?.chapterVoList) {
           unlockData.data.chapterVoList.forEach(ch => {
-              // Cari kualitas 720p > 540p > Default
               const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              const vidObj = cdn?.videoPathList?.find(v => v.quality === 720) ||
-                             cdn?.videoPathList?.find(v => v.quality === 540) ||
+              // Prioritas 720p > 540p > Default
+              const vidObj = cdn?.videoPathList?.find(v => v.quality === 720) || 
+                             cdn?.videoPathList?.find(v => v.quality === 540) || 
                              cdn?.videoPathList?.[0];
-              if (vidObj?.videoPath) {
-                  videoMap[ch.chapterId] = vidObj.videoPath;
-              }
+              if (vidObj?.videoPath) videoMap[ch.chapterId] = vidObj.videoPath;
           });
       }
 
-      // Susun Playlist Akhir
-      chapterList.forEach((ch) => {
-          // Coba cari di map Dramabox, atau fallback ke mp4 dari Webfic (kalau ada)
-          const vidUrl = videoMap[ch.id] || ch.mp4; 
-          
+      // 4. Susun Result
+      const finalChapters = [];
+      chapterList.forEach(ch => {
+          const vidUrl = videoMap[ch.id] || ch.mp4; // Coba Dramabox dulu, kalau gagal pakai Webfic
           if (vidUrl) {
               finalChapters.push({
                   index: ch.index,
@@ -180,47 +118,34 @@ export async function onRequest(context) {
           }
       });
 
-      if (finalChapters.length === 0) {
-           return jsonResponse({ error: "Gagal membuka kunci video (Batch Download kosong)." }, "UNLOCK-FAIL");
-      }
+      if (finalChapters.length === 0) return jsonResponse({ error: "Video terkunci oleh server." }, "ERR");
 
       const result = { 
-          title: webficData.data?.book?.bookName || "Drama",
+          title: webficData.data?.book?.bookName, 
+          cover: webficData.data?.book?.cover,
           chapters: finalChapters 
       };
 
-      // Simpan Cache (Hanya 30 menit agar link tidak basi)
-      if (env.DRAMABOX_CACHE && finalChapters.length > 0) {
-          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
-      }
+      // Cache 30 menit
+      if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
 
-      return jsonResponse(result, "WEBFIC-UNLOCK-SUCCESS");
+      return jsonResponse(result, "SUCCESS");
     }
 
     return new Response("Invalid Request", { status: 400 });
 
   } catch (err) {
-    return new Response(JSON.stringify({ 
-        error: "Internal Server Error", 
-        message: err.message,
-        stack: err.stack 
-    }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
 }
 
-// ============================================================================
-// 3. HELPER FUNCTIONS
-// ============================================================================
-
-// Fetch Series.json dengan penanganan error
+// --- HELPER ---
 async function fetchSeriesDB(url) {
     try {
         const res = await fetch(url);
-        if (!res.ok) return [];
-        return await res.json();
-    } catch (e) {
+        if (res.ok) return await res.json();
         return [];
-    }
+    } catch { return []; }
 }
 
 function mapLocalBook(b) {
@@ -229,22 +154,17 @@ function mapLocalBook(b) {
         title: b.title,
         cover: b.cover_path,
         episodes: "Full",
-        desc: b.description,
-        tags: ["Series Pilihan"]
+        tags: ["Series"]
     };
 }
 
-function mapLocalBookSearch(b) { return mapLocalBook(b); }
-
 async function fetchFromDramaBox(endpoint, payload) {
-  // Gunakan Signature RSA (Mandiri)
-  const signature = await createSignature(payload, MANUAL_TOKEN, MANUAL_DEVICE_ID, MANUAL_ANDROID_ID);
-  
+  const signature = await createSignature(payload);
   const headers = {
     "Host": "sapi.dramaboxdb.com",
     "Tn": `Bearer ${MANUAL_TOKEN}`,
-    "Version": FAKE_APP_VERSION, // 451
-    "Vn": FAKE_VN_VERSION,         // 4.5.1
+    "Version": FAKE_APP_VERSION,
+    "Vn": FAKE_VN_VERSION,
     "Package-Name": "com.storymatrix.drama",
     "Device-Id": MANUAL_DEVICE_ID,
     "Userid": MANUAL_USER_ID,
@@ -252,22 +172,19 @@ async function fetchFromDramaBox(endpoint, payload) {
     "Content-Type": "application/json; charset=UTF-8",
     "User-Agent": "okhttp/4.10.0",
     "sn": signature, 
-    "Language": "in", 
-    "Current-Language": "in", 
-    "Time-Zone": "+0700"
+    "Language": "in", "Current-Language": "in", "Time-Zone": "+0700"
   };
-
+  
   const res = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
     method: "POST", headers, body: JSON.stringify(payload)
   });
-
-  if (!res.ok) { return {}; }
+  if (!res.ok) return {};
   return await res.json();
 }
 
-async function createSignature(payload, token, deviceId, androidId) {
+async function createSignature(payload) {
     const bodyJson = JSON.stringify(payload); 
-    const toSignString = bodyJson + deviceId + androidId + "Bearer " + token;
+    const toSignString = bodyJson + MANUAL_DEVICE_ID + MANUAL_ANDROID_ID + "Bearer " + MANUAL_TOKEN;
     const encoder = new TextEncoder();
     const data = encoder.encode(toSignString);
     const key = await importPrivateKey(PRIVATE_KEY_PEM);
@@ -282,7 +199,7 @@ function importPrivateKey(pem) {
   return crypto.subtle.importKey("pkcs8", binaryDer.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
 }
 
-function jsonResponse(data, source = "Unknown") {
+function jsonResponse(data, source) {
   return new Response(JSON.stringify({ ...data, _source: source }), {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
   });
