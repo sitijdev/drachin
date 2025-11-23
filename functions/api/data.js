@@ -31,16 +31,12 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-// DATA MANUAL DARI HASIL SNIFFING (Pastikan ini valid/tidak expired)
+// DATA MANUAL (JANGAN DIHAPUS, INI KUNCI AKSES SERVER)
 const MANUAL_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnlaV2RwYzNSbGNsUjVjR1VpT2lKVVJVMVFJaXdpZFhObGNrbGtJam96TXpZd09EUXdOVFo5LkFLMWw0d01Ud00xVndOTHBOeUlOcmtHN3dmb0czaGROMEgxNWVPZV9KaHc=";
 const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
 const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
 const MANUAL_USER_ID = "336084056";
-const APP_VERSION = "470";
-
-// URL DATABASE SERIES ANDA (Raw GitHub)
-// Tips: Gunakan jsdelivr agar lebih cepat dan tidak kena rate limit GitHub
-const SERIES_DB_URL = "https://raw.githubusercontent.com/sitijdev/drachin/refs/heads/main/public/series.json";
+const APP_VERSION = "470"; 
 
 // ============================================================================
 // 2. ROUTER HANDLER
@@ -54,15 +50,18 @@ export async function onRequest(context) {
     const bookId = url.searchParams.get("bookId");
     const keyword = url.searchParams.get("keyword");
 
-    // --- A. SEARCH DRAMA ---
+    // URL dinamis ke file series.json (Otomatis deteksi domain saat ini)
+    const SERIES_JSON_URL = `${url.origin}/series.json`;
+
+    // --- A. SEARCH (Pencarian Hybrid) ---
     if (type === "search" && keyword) {
-      // 1. Cari di Database GitHub dulu (Lebih Akurat & Cepat)
-      const localData = await fetchSeriesDB();
+      // 1. Cari di series.json (Local Public File)
+      const localData = await fetchSeriesDB(SERIES_JSON_URL);
       const localResults = localData.filter(b => 
         b.title.toLowerCase().includes(keyword.toLowerCase())
       ).map(mapLocalBook);
 
-      // 2. Cari di API Dramabox (Opsional / Pelengkap)
+      // 2. Cari di API Dramabox
       const payload = {
         searchSource: "搜索按钮",
         pageNo: 1, pageSize: 20, from: "search_sug", keyword: keyword
@@ -77,46 +76,49 @@ export async function onRequest(context) {
           tags: item.tags || []
       }));
 
-      // Gabungkan (Prioritas Local)
-      const finalResults = [...localResults, ...apiResults];
-      
-      // Hapus duplikat ID
-      const uniqueResults = finalResults.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
+      // Gabungkan
+      const combined = [...localResults, ...apiResults];
+      const unique = combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
 
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: uniqueResults }] }, "SEARCH-HYBRID");
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH-HYBRID");
     }
 
     // --- B. LIST DRAMA (HOME) ---
     if (type === "list") {
       const combinedSections = [];
 
-      // 1. Ambil Data "Series.json" dari GitHub (SUMBER UTAMA)
-      const localData = await fetchSeriesDB();
+      // 1. Fetch "Series.json" dari folder public
+      const localData = await fetchSeriesDB(SERIES_JSON_URL);
       
       if (localData && localData.length > 0) {
-          // Bagi menjadi beberapa kategori agar tidak bosan
+          // Bagi data jadi beberapa section biar terlihat penuh
           combinedSections.push({
-              title: "🔥 Rekomendasi Spesial",
-              books: localData.slice(0, 20).map(mapLocalBook)
+              title: "🔥 Pilihan Editor (Full Unlocked)",
+              books: localData.slice(0, 15).map(mapLocalBook)
           });
           
-          if (localData.length > 20) {
-             combinedSections.push({
-                title: "📺 Koleksi Terpopuler",
-                books: localData.slice(20, 60).map(mapLocalBook)
-             });
+          if(localData.length > 15) {
+              combinedSections.push({
+                  title: "📺 Rekomendasi Spesial",
+                  books: localData.slice(15, 35).map(mapLocalBook)
+              });
+          }
+
+           if(localData.length > 35) {
+              combinedSections.push({
+                  title: "✨ Drama Populer Lainnya",
+                  books: localData.slice(35, 100).map(mapLocalBook)
+              });
           }
       }
 
-      // 2. Ambil Data Live dari Dramabox (Sebagai Pelengkap)
-      // Kita gunakan endpoint 'classify' agar dapat data acak baru
+      // 2. Ambil Data Live Tambahan dari Server (Opsional, biar makin rame)
       const browsePayload = { 
           pageSize: 20, 
           typeList: [{"type":1,"value":""},{"type":5,"value":"2"}], 
           pageNo: 1, showLabels: false 
       };
       const browseData = await fetchFromDramaBox("/drama-box/home/classify", browsePayload);
-
       if (browseData.data?.classifyBookList?.records) {
           combinedSections.push({ 
               title: "🆕 Update Terbaru Server", 
@@ -124,20 +126,20 @@ export async function onRequest(context) {
           });
       }
 
-      return jsonResponse({ sections: combinedSections }, "LIST-HYBRID");
+      return jsonResponse({ sections: combinedSections }, "LIST-HYBRID-FETCH");
     }
 
-    // --- C. DETAIL & CHAPTERS (RAHASIA UNLOCKER) ---
+    // --- C. DETAIL & CHAPTER (UNLOCKER) ---
     if (type === "chapter" && bookId) {
-      const cacheKey = `unlock_v4_${bookId}`;
+      const cacheKey = `unlock_v6_${bookId}`;
 
       // Cek Cache KV
       if (env.DRAMABOX_CACHE) {
         const cached = await env.DRAMABOX_CACHE.get(cacheKey);
-        if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
+        if (cached) return jsonResponse(JSON.parse(cached), "KV-CACHE");
       }
 
-      // 1. Ambil Daftar ID Chapter dulu (Pake batch/load biasa)
+      // 1. Ambil Info Chapter (Streaming Biasa)
       const loadPayload = {
           boundaryIndex: 0, comingPlaySectionId: -1, index: 1,
           currencyPlaySource: "discover_new_rec_new", needEndRecommend: 0,
@@ -145,69 +147,63 @@ export async function onRequest(context) {
           pullCid: "", loadDirection: 0, startUpKey: "", bookId: bookId
       };
       const loadData = await fetchFromDramaBox("/drama-box/chapterv2/batch/load", loadPayload);
-
+      
       if (!loadData?.data?.chapterList) {
-          return jsonResponse({ error: "Gagal memuat daftar episode." }, "ERROR-LOAD");
+          return jsonResponse({ error: "Gagal memuat info chapter. ID mungkin salah." }, "ERROR-LOAD");
       }
 
-      // 2. Kumpulkan semua ID Chapter
+      // 2. TRIK UNLOCK: Gunakan batchDownload
       const allChapterIds = loadData.data.chapterList.map(ch => ch.chapterId);
-
-      // 3. LAKUKAN "BATCH DOWNLOAD" UNTUK MEMBUKA KUNCI (INI RAHASIANYA!)
-      // Kita meminta server memberikan link download untuk SEMUA chapter sekaligus
       const unlockPayload = {
           bookId: bookId,
           chapterIdList: allChapterIds
       };
-      
       const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", unlockPayload);
 
-      // 4. Mapping Hasil Unlock ke Format Kita
-      // Kita gabungkan info dari 'loadData' (nama chapter) dengan 'unlockData' (link video sakti)
-      
+      // 3. Mapping Data
       const finalChapters = [];
-      
-      // Mapping bantuan: ID -> Nama
       const nameMap = {};
-      loadData.data.chapterList.forEach(ch => {
-          nameMap[ch.chapterId] = ch.chapterName;
+      loadData.data.chapterList.forEach(ch => nameMap[ch.chapterId] = ch.chapterName);
+
+      // Prioritaskan hasil unlock, fallback ke load biasa
+      const sourceList = unlockData?.data?.chapterVoList || loadData.data.chapterList;
+
+      sourceList.forEach((ch, idx) => {
+          const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
+          const vidObj = cdn?.videoPathList?.find(v => v.quality === 720) ||
+                         cdn?.videoPathList?.find(v => v.quality === 540) ||
+                         cdn?.videoPathList?.[0];
+          const vidUrl = vidObj?.videoPath;
+
+          if (vidUrl) {
+              finalChapters.push({
+                  index: idx + 1,
+                  title: nameMap[ch.chapterId] || ch.chapterName || `Episode ${idx+1}`,
+                  url: vidUrl
+              });
+          }
       });
 
-      // Ambil video dari hasil unlock (batchDownload)
-      if (unlockData?.data?.chapterVoList) {
-          unlockData.data.chapterVoList.forEach((ch, idx) => {
-              // Cari kualitas terbaik (720p/HD) atau default
-              const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              const vidUrl = cdn?.videoPathList?.find(v => v.quality === 720)?.videoPath ||
-                             cdn?.videoPathList?.[0]?.videoPath;
-
-              if (vidUrl) {
-                  finalChapters.push({
-                      index: idx + 1, // Urutan
-                      title: nameMap[ch.chapterId] || `Episode ${idx+1}`,
-                      url: vidUrl
-                  });
-              }
-          });
-      }
-
-      // Sortir berdasarkan episode
       finalChapters.sort((a, b) => a.index - b.index);
 
-      const resultData = { chapters: finalChapters };
+      const result = { chapters: finalChapters };
 
-      // Simpan Cache (Agar tidak nembak API terus)
-      if (env.DRAMABOX_CACHE) {
-          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(resultData), { expirationTtl: 14400 })); // Cache 4 jam
+      // Simpan Cache
+      if (env.DRAMABOX_CACHE && finalChapters.length > 0) {
+          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 20000 }));
       }
 
-      return jsonResponse(resultData, "UNLOCK-SUCCESS");
+      return jsonResponse(result, "UNLOCK-SUCCESS");
     }
 
     return new Response("Invalid Request", { status: 400 });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Internal Server Error", details: err.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ 
+        error: "Internal Server Error", 
+        message: err.message,
+        stack: err.stack 
+    }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 }
 
@@ -215,19 +211,19 @@ export async function onRequest(context) {
 // 3. HELPER FUNCTIONS
 // ============================================================================
 
-// Fetch database JSON dari GitHub Anda
-async function fetchSeriesDB() {
+// Fetch dari URL Public (series.json)
+async function fetchSeriesDB(url) {
     try {
-        const res = await fetch(SERIES_DB_URL);
+        // console.log("Fetching series from:", url);
+        const res = await fetch(url);
         if (!res.ok) return [];
         return await res.json();
     } catch (e) {
-        console.error("Gagal fetch GitHub:", e);
+        console.error("Gagal fetch series.json:", e);
         return [];
     }
 }
 
-// Mapper untuk Data Local (GitHub) -> Format Frontend
 function mapLocalBook(b) {
     return {
         id: b.source_id || b.id,
@@ -239,12 +235,11 @@ function mapLocalBook(b) {
     };
 }
 
-// Mapper untuk Data API Dramabox -> Format Frontend
 function mapBooks(list) {
     return list.map(b => ({
         id: b.bookId,
         title: b.bookName,
-        cover: b.coverWap || b.cover,
+        cover: b.coverWap || b.cover || b.imagePath,
         episodes: b.chapterCount || "?",
         desc: b.introduction || "",
         tags: b.tags || []
@@ -253,7 +248,6 @@ function mapBooks(list) {
 
 async function fetchFromDramaBox(endpoint, payload) {
   const signature = await createSignature(payload, MANUAL_TOKEN, MANUAL_DEVICE_ID, MANUAL_ANDROID_ID);
-  
   const headers = {
     "Host": "sapi.dramaboxdb.com",
     "Tn": `Bearer ${MANUAL_TOKEN}`,
@@ -265,17 +259,16 @@ async function fetchFromDramaBox(endpoint, payload) {
     "Content-Type": "application/json; charset=UTF-8",
     "User-Agent": "okhttp/4.10.0",
     "sn": signature, 
-    "Language": "in", "Current-Language": "in", "Time-Zone": "+0700"
+    "Language": "in", 
+    "Current-Language": "in", 
+    "Time-Zone": "+0700"
   };
 
   const res = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
     method: "POST", headers, body: JSON.stringify(payload)
   });
 
-  if (!res.ok) {
-      const txt = await res.text();
-      return { error: true, status: res.status, message: txt };
-  }
+  if (!res.ok) { return {}; }
   return await res.json();
 }
 
