@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dramabox Viewer</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f9f9f9; color: #333; }
+        h1 { text-align: center; color: #e63946; }
+        .card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
+        .hidden { display: none; }
+        .episode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; margin-top: 15px; }
+        .episode-btn { background: #1d3557; color: white; padding: 10px; text-align: center; border-radius: 5px; text-decoration: none; font-size: 14px; display: block; }
+        .episode-btn:hover { background: #457b9d; }
+        .back-btn { background: #ccc; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
+        #loading { text-align: center; font-weight: bold; color: #666; margin: 20px 0; }
+        .source-badge { font-size: 0.8em; color: #888; float: right; }
+    </style>
+</head>
+<body>
+
+    <h1>🎭 Dramabox Viewer</h1>
+    <div id="loading" class="hidden">⏳ Memuat data...</div>
+
+    <div id="drama-list">
+        <div id="dramas-container"></div>
+    </div>
+
+    <div id="chapter-view" class="hidden">
+        <button class="back-btn" onclick="showDramaList()">⬅ Kembali</button>
+        <h2 id="book-title">Judul Drama</h2>
+        <p style="font-size: 0.9em; color: #666;">Data Source: <span id="data-source">-</span></p>
+        <div id="chapters-container" class="episode-grid"></div>
+    </div>
+
+    <script>
+        const apiBase = "/api/data"; 
+
+        // Cek URL Params saat load (untuk support link sitemap)
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            const bookId = params.get("bookId");
+            if (bookId) {
+                loadChapters(bookId, "Detail Drama");
+            } else {
+                loadDramas();
+            }
+        };
+
+        async function loadDramas() {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('drama-list').classList.remove('hidden');
+            document.getElementById('chapter-view').classList.add('hidden');
+            
+            try {
+                const res = await fetch(`${apiBase}?type=list`);
+                const json = await res.json();
+                const container = document.getElementById('dramas-container');
+                container.innerHTML = '';
+
+                const columns = json.data.columnVoList || [];
+                columns.forEach(col => {
+                    col.bookList.forEach(book => {
+                        const div = document.createElement('div');
+                        div.className = 'card';
+                        div.innerHTML = `<strong>${book.bookName}</strong><br><small>Episodes: ${book.chapterCount} | Views: ${book.playCount}</small>`;
+                        div.onclick = () => {
+                            // Update URL browser tanpa reload
+                            history.pushState({}, "", `?bookId=${book.bookId}`);
+                            loadChapters(book.bookId, book.bookName);
+                        };
+                        container.appendChild(div);
+                    });
+                });
+            } catch (e) {
+                alert("Gagal memuat list: " + e.message);
+            }
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        async function loadChapters(bookId, title) {
+            document.getElementById('drama-list').classList.add('hidden');
+            document.getElementById('chapter-view').classList.remove('hidden');
+            document.getElementById('book-title').innerText = title;
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('chapters-container').innerHTML = '';
+
+            try {
+                const res = await fetch(`${apiBase}?type=chapter&bookId=${bookId}`);
+                const json = await res.json();
+                
+                // Tampilkan sumber data (KV, D1, atau API)
+                document.getElementById('data-source').innerText = json._source || "Unknown";
+
+                const chapters = json.data.chapterList || [];
+                const container = document.getElementById('chapters-container');
+
+                chapters.forEach((ch, i) => {
+                    const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
+                    const videoPath = cdn?.videoPathList?.find(v => v.isDefault === 1)?.videoPath;
+
+                    if (videoPath) {
+                        const a = document.createElement('a');
+                        a.className = 'episode-btn';
+                        a.href = videoPath;
+                        a.innerText = `Ep ${i + 1}`;
+                        a.target = "_blank";
+                        container.appendChild(a);
+                    }
+                });
+            } catch (e) {
+                alert("Gagal load chapter");
+            }
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function showDramaList() {
+            history.pushState({}, "", "/"); // Reset URL
+            loadDramas();
+        }
+    </script>
+</body>
+</html>
