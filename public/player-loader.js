@@ -1,11 +1,11 @@
 (function(){
-  // loader untuk menangani /player/* pages: inject safe, restore footer, render related
+  // loader untuk /player/*: inject aman, restore header/footer, fix onclick handlers, expose toggleFav
   const API = '/api/data';
 
   async function init() {
     if (!location.pathname.startsWith('/player/')) return;
 
-    // Simpan footer (sticky nav) & header yang ingin dipertahankan jika ada
+    // Simpan footer & header yg ingin dipertahankan (sticky nav)
     const footer = document.querySelector('.glass-bottom');
     const header = document.querySelector('.glass-nav');
 
@@ -20,7 +20,7 @@
       // update title
       if (doc.title) document.title = doc.title;
 
-      // copy head non-script resources (avoid re-adding tailwind CDN)
+      // copy head non-script (hindari mengulang tailwind CDN)
       Array.from(doc.head.children).forEach(el => {
         if (el.tagName === 'SCRIPT') return;
         if (el.tagName === 'LINK') {
@@ -33,14 +33,14 @@
           return;
         }
         // STYLE, META, TITLE etc.
-        // clone naively; most projects don't have colliding meta tags that matter here
+        // clone naively; OK untuk kebanyakan kasus
         document.head.appendChild(el.cloneNode(true));
       });
 
-      // replace body content
+      // replace body content with player body
       document.body.innerHTML = doc.body.innerHTML;
 
-      // re-attach preserved header/footer so sticky UI tetap ada
+      // re-attach preserved header/footer agar sticky UI tetap muncul
       if (header && !document.querySelector('.glass-nav')) {
         document.body.insertBefore(header, document.body.firstChild);
       }
@@ -48,21 +48,49 @@
         document.body.appendChild(footer);
       }
 
+      // Setelah footer dipasang, override onclick pada nav-bottom supaya tidak memanggil SPA switchTab
+      sanitizeFooterNav();
+
       // helper: execute scripts found in fetched doc
       const runScripts = (container) => {
         Array.from(container.querySelectorAll('script')).forEach(s => {
-          if (s.src && s.src.includes('cdn.tailwindcss.com')) return; // skip tailwind cdn duplicates
+          // skip tailwind CDN duplicates
+          if (s.src && s.src.includes('cdn.tailwindcss.com')) return;
+
           if (s.src) {
+            // external script: append as-is
             const newS = document.createElement('script');
             newS.src = s.src;
             if (s.hasAttribute('async')) newS.async = true;
             document.body.appendChild(newS);
           } else {
-            // inline script: execute as module to avoid global var collisions
-            const inline = document.createElement('script');
-            inline.type = 'module';
-            inline.textContent = s.textContent || '';
-            document.body.appendChild(inline);
+            // inline script: wrap in IIFE to avoid global collisions,
+            // then expose known-needed functions (toggleFav, updateFavBtn) to window if defined.
+            const wrapped = `
+              (function(){
+                try {
+                  ${s.textContent}
+                } catch(e) {
+                  console.error('player inline script error', e);
+                }
+                try {
+                  if (typeof toggleFav !== 'undefined') window.toggleFav = toggleFav;
+                } catch(e) {}
+                try {
+                  if (typeof updateFavBtn !== 'undefined') window.updateFavBtn = updateFavBtn;
+                } catch(e) {}
+                try {
+                  if (typeof saveHistory !== 'undefined') {
+                    // expose saveHistory only if it's safe (not overwriting)
+                    window.saveHistory = saveHistory;
+                  }
+                } catch(e) {}
+              })();
+            `;
+            const newInline = document.createElement('script');
+            newInline.type = 'text/javascript';
+            newInline.textContent = wrapped;
+            document.body.appendChild(newInline);
           }
         });
       };
@@ -70,23 +98,53 @@
       if (doc.head) runScripts(doc.head);
       if (doc.body) runScripts(doc.body);
 
-      // Setelah player terpasang: coba render related videos (fallback)
+      // render related fallback if needed (existing logic)
       renderRelatedFallback();
-
     } catch (err) {
       console.warn('player-loader: gagal inject player', err);
     }
   }
 
-  // Fallback renderer untuk related videos: ambil daftar dari API type=list, pilih beberapa item
+  function sanitizeFooterNav() {
+    try {
+      const footer = document.querySelector('.glass-bottom');
+      if (!footer) return;
+      // cari tombol nav (menggunakan class .nav-btn / id tab-*)
+      const navButtons = footer.querySelectorAll('.nav-btn');
+      navButtons.forEach(btn => {
+        // ambil id tab-xxx
+        const id = btn.id || '';
+        // Remove inline onclick attribute to prevent calling SPA switchTab which expects #app
+        if (btn.hasAttribute('onclick')) btn.removeAttribute('onclick');
+
+        // Set fallback behaviour:
+        // - home => navigate to root
+        // - favorites/history/account => navigate to root with hash so SPA can pick (optional)
+        if (id === 'tab-home') {
+          btn.addEventListener('click', (e) => { e.preventDefault(); location.href = '/'; });
+        } else if (id === 'tab-favorites') {
+          btn.addEventListener('click', (e) => { e.preventDefault(); location.href = '/#favorites'; });
+        } else if (id === 'tab-history') {
+          btn.addEventListener('click', (e) => { e.preventDefault(); location.href = '/#history'; });
+        } else if (id === 'tab-account') {
+          btn.addEventListener('click', (e) => { e.preventDefault(); location.href = '/#account'; });
+        } else {
+          // default to root
+          btn.addEventListener('click', (e) => { e.preventDefault(); location.href = '/'; });
+        }
+      });
+    } catch (e) {
+      console.warn('sanitizeFooterNav error', e);
+    }
+  }
+
+  // Fallback related renderer (sama seperti sebelumnya)
   async function renderRelatedFallback() {
     try {
-      // ambil bookId dari url /player/BOOKID-EP
       const slug = location.pathname.replace(/\/+$/, '').split('/').pop() || '';
       const sep = slug.lastIndexOf('-');
       const bookId = sep !== -1 ? slug.substring(0, sep) : slug;
 
-      // tempelkan container related setelah #desc jika ada
       let container = document.getElementById('related-videos');
       const descEl = document.getElementById('desc');
 
@@ -102,19 +160,14 @@
       const grid = document.getElementById('related-grid');
       if (!grid) return;
 
-      // Ambil daftar (fallback: type=list)
       const res = await fetch(`${API}?type=list`);
       if (!res.ok) return;
       const json = await res.json();
       const sections = json.sections || [];
-      // flatten books
       let books = sections.flatMap(s => s.books || []);
-      // remove current book and duplicates
       books = books.filter(b => b && String(b.id) !== String(bookId));
-      // take up to 12
       books = books.slice(0, 12);
 
-      // simple card renderer (mirip createCard dari SPA)
       const cardHTML = (b) => {
         const targetEp = b.lastEpisode || 1;
         const url = `/player/${b.id}-${targetEp}`;
@@ -134,7 +187,7 @@
     }
   }
 
-  // tunggu DOM siap agar kita bisa mengambil footer/header yang ada
+  // start when DOM ready to capture header/footer from original page
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
