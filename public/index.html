@@ -6,6 +6,36 @@
     <title>Dramabox Unofficial</title>
     <meta name="description" content="Nonton drama pendek sub Indo gratis.">
     <meta name="theme-color" content="#0f0f0f">
+
+    <!-- ROUTE HANDLER: jika path dimulai dengan /player/ then load player/index.html content
+         Supaya slug (contoh /player/41000107913-1) tetap ada tetapi yang dijalankan adalah halaman player -->
+    <script>
+      (function(){
+        try {
+          if (location.pathname.startsWith('/player/')) {
+            // ambil file player/index.html dari server (relative ke public/)
+            fetch('/player/index.html', {cache: 'no-store'})
+              .then(resp => {
+                if (!resp.ok) throw new Error('Gagal mengambil player page');
+                return resp.text();
+              })
+              .then(html => {
+                // ganti seluruh dokumen dengan isi player page (URL tetap sama)
+                document.open();
+                document.write(html);
+                document.close();
+              })
+              .catch(() => {
+                // jika gagal, biarkan SPA root tampil (atau tampilkan pesan)
+                console.warn('Fallback: tidak bisa load player page, menampilkan beranda.');
+              });
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      })();
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
