@@ -1,5 +1,8 @@
-// --- 1. KONFIGURASI KUNCI RSA (Wajib ada untuk signing) ---
-// Ini dari repository PHP yang Anda upload sebelumnya
+// ============================================================================
+// 1. KONFIGURASI KREDENSIAL & KUNCI
+// ============================================================================
+
+// Private Key RSA (Wajib untuk Signature agar request tidak ditolak server)
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
 nbY3irfKdkEllAU2OORnAjlXDyCzcm2Z6ZRrGvtTZUAMelfU5PWS6XGEm3d4kJEK
@@ -29,15 +32,16 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-// --- 2. MANUAL DATA (HASIL SNIFFING ANDA) ---
-// Kita masukkan data asli yang Anda dapatkan agar request 100% valid.
-
-// Token diambil dari header 'tn'. Kita buang "Bearer " depannya karena script akan menambahkannya nanti.
+// Data Manual hasil Sniffing (JANGAN DIUBAH KECUALI TOKEN EXPIRED)
 const MANUAL_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnlaV2RwYzNSbGNsUjVjR1VpT2lKVVJVMVFJaXdpZFhObGNrbGtJam96TXpZd09EUXdOVFo5LkFLMWw0d01Ud00xVndOTHBOeUlOcmtHN3dmb0czaGROMEgxNWVPZV9KaHc=";
 const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
 const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
 const MANUAL_USER_ID = "336084056";
-const APP_VERSION = "470"; // Update ke versi 4.7.0 sesuai header Anda
+const APP_VERSION = "470";
+
+// ============================================================================
+// 2. MAIN HANDLER (REQUEST ROUTER)
+// ============================================================================
 
 export async function onRequest(context) {
   try {
@@ -46,38 +50,65 @@ export async function onRequest(context) {
     const type = url.searchParams.get("type");
     const bookId = url.searchParams.get("bookId");
 
-    // --- A. LIST DRAMA ---
-    if (type === "list") {
-      // Gunakan endpoint Theater agar sesuai struktur frontend
-      const payload = {
+    // --- DEBUGGING ENDPOINTS (Untuk melihat struktur JSON Asli) ---
+
+    // 1. Debug List: Lihat data mentah daftar drama
+    // Akses: /api/data?type=debug_list
+    if (type === "debug_list") {
+       const payload = {
         isNeedRank: 1,
         index: 0,
         type: 0,
         channelId: 175
       };
-      
       const data = await fetchFromDramaBox("/drama-box/he001/theater", payload, env);
-      return jsonResponse(data);
+      return jsonResponse(data, "DEBUG-LIST-RAW");
     }
 
-    // --- B. DETAIL CHAPTER (Tiered Storage: KV -> D1 -> API) ---
+    // 2. Debug Detail: Lihat data mentah detail satu drama
+    // Akses: /api/data?type=detail&bookId=12345
+    if (type === "detail" && bookId) {
+       const payload = {
+        bookId: bookId,
+        needRecommend: false, 
+        from: "book_album"
+      };
+      const data = await fetchFromDramaBox("/drama-box/chapterv2/detail", payload, env);
+      return jsonResponse(data, "DEBUG-DETAIL-RAW");
+    }
+
+    // --- APPLICATION ENDPOINTS (Untuk Frontend HTML) ---
+
+    // A. LIST DRAMA (Home Page)
+    if (type === "list") {
+      const payload = { 
+          isNeedRank: 1, 
+          index: 0, 
+          type: 0, 
+          channelId: 175 
+      };
+      const data = await fetchFromDramaBox("/drama-box/he001/theater", payload, env);
+      return jsonResponse(data, "LIVE-API");
+    }
+
+    // B. CHAPTER & VIDEO LINKS (Player & Episode Grid)
     if (type === "chapter" && bookId) {
       const cacheKey = `chapter_list_${bookId}`;
 
-      // 1. Cek KV (Cache Tercepat)
+      // 1. Cek Cache (KV) - Tercepat
       if (env.DRAMABOX_CACHE) {
         const cachedKV = await env.DRAMABOX_CACHE.get(cacheKey);
-        if (cachedKV) return jsonResponse(JSON.parse(cachedKV), "KV-Cache");
+        if (cachedKV) return jsonResponse(JSON.parse(cachedKV), "KV-CACHE");
       }
 
-      // 2. Cek DB (Database Permanen D1)
+      // 2. Cek Database (D1) - Cadangan Permanen
       if (env.DB) {
         const dbResult = await env.DB.prepare(
             "SELECT * FROM chapters WHERE book_id = ? ORDER BY episode_number ASC"
         ).bind(bookId).all();
 
         if (dbResult.results && dbResult.results.length > 0) {
-          // Reconstruct format data agar mirip API asli
+          // Format ulang agar mirip struktur API asli biar frontend gak error
           const formattedData = { 
             data: { chapterList: dbResult.results.map(row => ({
                 chapterId: row.chapter_id, 
@@ -85,15 +116,16 @@ export async function onRequest(context) {
                 cdnList: [{ videoPathList: [{ videoPath: row.video_url, isDefault: 1 }] }]
             }))} 
           };
-          // Refresh cache KV
+          
+          // Simpan balik ke KV biar request selanjutnya ngebut
           if (env.DRAMABOX_CACHE) {
             context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(formattedData), { expirationTtl: 14400 }));
           }
-          return jsonResponse(formattedData, "D1-Database");
+          return jsonResponse(formattedData, "D1-DATABASE");
         }
       }
 
-      // 3. Fetch API Asli (Menggunakan Token & Signature Manual)
+      // 3. Fetch API Asli (Jika data tidak ada di Cache/DB)
       const payload = {
           boundaryIndex: 0, comingPlaySectionId: -1, index: 1,
           currencyPlaySource: "discover_new_rec_new", needEndRecommend: 0,
@@ -103,19 +135,18 @@ export async function onRequest(context) {
 
       const apiData = await fetchFromDramaBox("/drama-box/chapterv2/batch/load", payload, env);
 
+      // Jika berhasil, simpan ke D1 dan KV (Background Process)
       if (apiData?.data?.chapterList) {
-        // Simpan ke D1 & KV secara background
         if (env.DB) context.waitUntil(saveToD1(env.DB, bookId, apiData));
         if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(apiData), { expirationTtl: 14400 }));
       }
 
-      return jsonResponse(apiData, "Upstream-API-Signed");
+      return jsonResponse(apiData, "UPSTREAM-API");
     }
 
-    return new Response("Invalid Parameters", { status: 400 });
+    return new Response("Invalid Request. Gunakan ?type=list atau ?type=chapter&bookId=...", { status: 400 });
 
   } catch (err) {
-    // Tampilkan detail error JSON jika terjadi masalah
     return new Response(JSON.stringify({ 
         error: "Internal Server Error", 
         message: err.message, 
@@ -124,35 +155,38 @@ export async function onRequest(context) {
   }
 }
 
-// --- HELPER FUNCTIONS ---
 
-// 1. Logic Request ke API Utama dengan Signing
+// ============================================================================
+// 3. HELPER FUNCTIONS (CORE LOGIC)
+// ============================================================================
+
+// -- Fungsi Utama: Request ke API DramaBox dengan Signature --
 async function fetchFromDramaBox(endpoint, payload, env) {
-  // Gunakan kredensial manual yang baru saja didapat
+  // Data manual
   const token = MANUAL_TOKEN;
   const deviceId = MANUAL_DEVICE_ID;
-  const androidId = MANUAL_ANDROID_ID; // Penting untuk signature
+  const androidId = MANUAL_ANDROID_ID; 
   
-  // Generate Signature menggunakan Private Key & Data Payload
-  // Rumus PHP: $toSign = $bodyJson . $deviceId . $androidId . $bearerToken;
+  // Buat Signature RSA
   const signature = await createSignature(payload, token, deviceId, androidId);
   
+  // Headers persis seperti hasil sniffing Packet Capture
   const headers = {
     "Host": "sapi.dramaboxdb.com",
-    "Tn": `Bearer ${token}`, // Format: Bearer <token>
-    "Version": APP_VERSION,  // 470
+    "Tn": `Bearer ${token}`,
+    "Version": APP_VERSION,
     "Package-Name": "com.storymatrix.drama",
     "Device-Id": deviceId,
     "Userid": MANUAL_USER_ID,
     "Android-Id": androidId, 
     "Content-Type": "application/json; charset=UTF-8",
-    "User-Agent": "okhttp/4.10.0", // User Agent asli aplikasi Android
-    "sn": signature, // Signature RSA hasil generate
+    "User-Agent": "okhttp/4.10.0",
+    "sn": signature, 
     "Language": "in",
     "Current-Language": "in",
     "Time-Zone": "+0700",
-    "Brand": "Xiaomi", // Sesuai header sniffing
-    "Md": "Redmi Note 8", // Sesuai header sniffing
+    "Brand": "Xiaomi",
+    "Md": "Redmi Note 8", 
     "Mf": "XIAOMI",
     "Apn": "1",
     "P": "48",
@@ -175,27 +209,22 @@ async function fetchFromDramaBox(endpoint, payload, env) {
   return await res.json();
 }
 
-// 2. Logic Signature (RSA Signing - Porting dari PHP)
+// -- Fungsi: Membuat RSA Signature --
 async function createSignature(payload, token, deviceId, androidId) {
-    // Pastikan urutan penggabungan string sama persis dengan versi PHP
     const bodyJson = JSON.stringify(payload); 
-    // String yang akan di-sign: JSON + DeviceID + AndroidID + "Bearer " + Token
+    // Rumus: JSON Payload + DeviceID + AndroidID + "Bearer " + Token
     const toSignString = bodyJson + deviceId + androidId + "Bearer " + token;
     
     const encoder = new TextEncoder();
     const data = encoder.encode(toSignString);
     
-    // Import Private Key
     const key = await importPrivateKey(PRIVATE_KEY_PEM);
-    
-    // Sign dengan SHA-256
     const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
     
-    // Encode hasil ke Base64
     return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
 }
 
-// 3. Helper Import Key
+// -- Fungsi: Import Private Key PEM ke Format WebCrypto --
 function importPrivateKey(pem) {
   const binaryDerString = atob(pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\n/g, "").replace(/\s/g, ""));
   const binaryDer = new Uint8Array(binaryDerString.length);
@@ -211,16 +240,16 @@ function importPrivateKey(pem) {
   );
 }
 
-// 4. Logic Save ke Database D1
+// -- Fungsi: Simpan Data ke D1 Database --
 async function saveToD1(db, bookId, data) {
     try {
         const chapters = data.data.chapterList;
         const now = Date.now();
 
-        // Simpan Info Buku (Upsert)
+        // 1. Simpan/Update Data Buku (Terakhir diakses kapan)
         await db.prepare(`INSERT OR REPLACE INTO books (book_id, updated_at) VALUES (?, ?)`).bind(bookId, now).run();
 
-        // Batch Insert Chapters
+        // 2. Simpan Daftar Chapter
         const stmt = db.prepare(`
             INSERT OR IGNORE INTO chapters (chapter_id, book_id, title, video_url, episode_number, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -228,7 +257,7 @@ async function saveToD1(db, bookId, data) {
 
         const batch = [];
         chapters.forEach((ch, index) => {
-            // Ambil link video dengan kualitas terbaik atau default
+            // Cari link video terbaik
             const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
             const vidUrl = cdn?.videoPathList?.find(v => v.isDefault === 1)?.videoPath;
             
@@ -246,12 +275,16 @@ async function saveToD1(db, bookId, data) {
 
         if(batch.length > 0) await db.batch(batch);
     } catch (e) {
-        console.error("Gagal menyimpan ke DB:", e);
+        console.error("Error saving to D1:", e);
     }
 }
 
+// -- Fungsi: Format Response JSON --
 function jsonResponse(data, source = "Unknown") {
   return new Response(JSON.stringify({ ...data, _source: source }), {
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    headers: { 
+        "Content-Type": "application/json", 
+        "Access-Control-Allow-Origin": "*" 
+    }
   });
 }
