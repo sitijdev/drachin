@@ -1,5 +1,5 @@
 // ============================================================================
-// 1. KONFIGURASI
+// 1. KONFIGURASI KREDENSIAL
 // ============================================================================
 
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
@@ -53,10 +53,27 @@ export async function onRequest(context) {
       const localResults = localData.filter(b => 
         b.title.toLowerCase().includes(keyword.toLowerCase())
       ).map(mapLocalBook);
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: localResults }] }, "SEARCH");
+
+      const payload = {
+        searchSource: "搜索按钮", pageNo: 1, pageSize: 20, from: "search_sug", keyword: keyword
+      };
+      const rawData = await fetchFromDramaBox("/drama-box/search/search", payload);
+      const apiResults = (rawData.data?.searchList || []).map(item => ({
+          id: item.bookId || item.id,
+          title: item.bookName || item.title,
+          cover: item.cover || item.bookCover,
+          episodes: item.chapterCount || "?",
+          desc: item.introduction || "Hasil pencarian",
+          tags: item.tags || []
+      }));
+
+      const combined = [...localResults, ...apiResults];
+      const unique = combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
+
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH");
     }
 
-    // --- B. LIST (HOME) ---
+    // --- B. LIST ---
     if (type === "list") {
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
       const combinedSections = [];
@@ -69,35 +86,44 @@ export async function onRequest(context) {
       return jsonResponse({ sections: combinedSections }, "LIST");
     }
 
-    // --- C. DETAIL & CHAPTER (UNLOCKER SYSTEM) ---
+    // --- C. PLAYER DETAIL & CHAPTERS ---
     if (type === "chapter" && bookId) {
-      const cacheKey = `unlock_wfc_${bookId}`;
+      const cacheKey = `unlock_detail_v1_${bookId}`;
       if (env.DRAMABOX_CACHE) {
         const cached = await env.DRAMABOX_CACHE.get(cacheKey);
         if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
       }
 
-      // 1. Ambil Data dari Webfic (Mirror yang lebih stabil)
+      // 1. Ambil Metadata Lengkap dari Webfic
       const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${bookId}&tlanguage=in`);
-      if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data Webfic" }, "ERR");
-      const webficData = await webficRes.json();
-      const chapterList = webficData.data?.chapterList || [];
+      if (!webficRes.ok) return jsonResponse({ error: "Gagal menghubungi server Webfic" }, "ERR");
+      const webficJson = await webficRes.json();
+      const data = webficJson.data;
 
-      if (chapterList.length === 0) return jsonResponse({ error: "Chapter tidak ditemukan" }, "ERR");
+      if (!data || !data.book) return jsonResponse({ error: "Drama tidak ditemukan." }, "ERR");
 
-      // 2. Ambil Link Video dari Dramabox (Batch Download)
+      // 2. Siapkan Rekomendasi (Related)
+      // Ambil dari Webfic jika ada, atau ambil acak dari series.json nanti di frontend
+      const relatedBooks = (data.recommends || []).map(b => ({
+          id: b.bookId,
+          title: b.bookName,
+          cover: b.cover,
+          episodes: b.chapterCount
+      }));
+
+      // 3. Unlock Video (Batch Download)
+      const chapterList = data.chapterList || [];
       const allChapterIds = chapterList.map(ch => ch.id);
       const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", {
           bookId: bookId,
           chapterIdList: allChapterIds
       });
 
-      // 3. Mapping Video
+      // 4. Mapping Video & Chapters
       const videoMap = {};
       if (unlockData?.data?.chapterVoList) {
           unlockData.data.chapterVoList.forEach(ch => {
               const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              // Prioritas 720p > 540p > Default
               const vidObj = cdn?.videoPathList?.find(v => v.quality === 720) || 
                              cdn?.videoPathList?.find(v => v.quality === 540) || 
                              cdn?.videoPathList?.[0];
@@ -105,10 +131,9 @@ export async function onRequest(context) {
           });
       }
 
-      // 4. Susun Result
       const finalChapters = [];
       chapterList.forEach(ch => {
-          const vidUrl = videoMap[ch.id] || ch.mp4; // Coba Dramabox dulu, kalau gagal pakai Webfic
+          const vidUrl = videoMap[ch.id] || ch.mp4;
           if (vidUrl) {
               finalChapters.push({
                   index: ch.index,
@@ -120,10 +145,20 @@ export async function onRequest(context) {
 
       if (finalChapters.length === 0) return jsonResponse({ error: "Video terkunci oleh server." }, "ERR");
 
-      const result = { 
-          title: webficData.data?.book?.bookName, 
-          cover: webficData.data?.book?.cover,
-          chapters: finalChapters 
+      // 5. Susun Response Lengkap (SEO Ready)
+      const result = {
+          info: {
+              id: data.book.bookId,
+              title: data.book.bookName,
+              cover: data.book.cover,
+              desc: data.book.introduction,
+              tags: data.book.tags || [],
+              author: data.book.authorName || "Dramabox",
+              views: data.book.viewCount,
+              totalEps: finalChapters.length
+          },
+          chapters: finalChapters,
+          related: relatedBooks
       };
 
       // Cache 30 menit
@@ -154,6 +189,7 @@ function mapLocalBook(b) {
         title: b.title,
         cover: b.cover_path,
         episodes: "Full",
+        desc: b.description,
         tags: ["Series"]
     };
 }
