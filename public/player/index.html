@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Player - Dramabox</title>
+    <title>Memuat Player...</title>
     <meta name="theme-color" content="#000000">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -14,17 +14,15 @@
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
         .expanded { -webkit-line-clamp: unset; }
     </style>
-    <script type="application/ld+json" id="seo-video">{}</script>
 </head>
 <body class="flex flex-col min-h-screen">
 
     <nav class="fixed top-0 w-full bg-black/60 backdrop-blur z-50 h-14 flex items-center px-4 justify-between">
         <a href="/" class="text-white flex items-center gap-2 hover:text-red-500 transition">
-            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Kembali</span>
+            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Beranda</span>
         </a>
         <div class="flex items-center gap-3">
-            <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden">
-            </select>
+            <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden"></select>
         </div>
     </nav>
 
@@ -37,15 +35,15 @@
                 <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
                     <div class="text-center">
                         <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i>
-                        <p class="text-xs text-gray-500">Memuat Video...</p>
+                        <p class="text-xs text-gray-500">Sedang memuat video...</p>
                     </div>
                 </div>
             </div>
 
-            <div class="mt-5 px-4 sm:px-0">
+            <div id="info-container" class="mt-5 px-4 sm:px-0 hidden">
                 <div class="flex justify-between items-start gap-2">
-                    <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">Memuat Judul...</h1>
-                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-500 hover:text-red-500 transition p-2"><i class="far fa-heart text-xl"></i></button>
+                    <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">Judul Drama</h1>
+                    <button id="fav-btn" class="text-gray-500 hover:text-red-500 transition p-2"><i class="far fa-heart text-xl"></i></button>
                 </div>
 
                 <div class="flex items-center mt-4 gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800">
@@ -79,51 +77,61 @@
     </main>
 
     <script>
-        const API = "/api/data";
-        
-        // Parse URL secara manual karena ini halaman statis
+        // --- LOGIKA UTAMA: PARSING URL ---
+        // URL: https://domain.com/player/41000103145/1
         const pathParts = window.location.pathname.split('/'); 
-        // parts = ["", "player", "BOOKID", "EPINDEX"]
-        const bookId = pathParts[2]; 
-        const epIndex = parseInt(pathParts[3]) || 1;
+        // Hasil split: ["", "player", "41000103145", "1"]
+        
+        const BOOK_ID = pathParts[2];
+        const EP_INDEX = parseInt(pathParts[3]) || 1;
+        const API_BASE = "/api/data";
 
-        // LocalStorage
-        const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
-        const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
-        let currentInfo = null;
+        // Init Shell
+        if (!BOOK_ID) {
+            alert("ID Drama tidak ditemukan di URL");
+            window.location.href = "/";
+        } else {
+            loadData();
+        }
 
-        async function init() {
-            if(!bookId) { alert("URL Salah"); return; }
-
+        async function loadData() {
             try {
-                const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
+                // 1. Panggil API
+                const res = await fetch(`${API_BASE}?type=chapter&bookId=${BOOK_ID}`);
                 const json = await res.json();
 
-                if(json.error) throw new Error(json.error);
+                if (json.error) throw new Error(json.error);
 
+                // 2. Olah Data
                 const chapters = json.chapters || [];
-                const currentChap = chapters.find(c => c.index === epIndex) || chapters[0];
+                const currentChap = chapters.find(c => c.index === EP_INDEX) || chapters[0];
                 const info = json.info || {};
-                currentInfo = info;
 
-                // Simpan History
-                const hist = getLS('db_history');
-                hist[bookId] = { id: bookId, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: epIndex, timestamp: Date.now() };
-                setLS('db_history', hist);
+                if (!currentChap) throw new Error("Episode tidak ditemukan");
 
-                renderPlayer(json, currentChap, chapters);
+                // 3. Render ke Layar
+                renderPlayer(info, currentChap, chapters, json.related);
+                
+                // 4. Simpan History
+                saveHistory(BOOK_ID, info, currentChap.index);
 
-            } catch(e) {
-                document.getElementById('loader').innerHTML = `<div class="text-center text-red-500"><i class="fas fa-exclamation-circle text-3xl mb-2"></i><br>${e.message}<br><a href="/" class="underline mt-2 block">Kembali</a></div>`;
+            } catch (e) {
+                document.getElementById('loader').innerHTML = `
+                    <div class="text-center text-red-500 px-4">
+                        <i class="fas fa-exclamation-triangle text-3xl mb-2"></i>
+                        <p class="text-sm font-bold">Gagal Memuat</p>
+                        <p class="text-xs mt-1 text-gray-400">${e.message}</p>
+                        <a href="/" class="mt-4 inline-block bg-zinc-800 px-4 py-2 rounded text-xs text-white">Kembali</a>
+                    </div>`;
             }
         }
 
-        function renderPlayer(data, currentChap, chapters) {
-            // Video & Quality
+        function renderPlayer(info, currentChap, chapters, related) {
             const vid = document.getElementById('video-el');
-            const loader = document.getElementById('loader');
             const qSelect = document.getElementById('quality-select');
+            const loader = document.getElementById('loader');
 
+            // Setup Video & Quality
             if (currentChap.sources && Array.isArray(currentChap.sources)) {
                 qSelect.classList.remove('hidden');
                 qSelect.innerHTML = currentChap.sources.map(s => `<option value="${s.url}">${s.q}p</option>`).join('');
@@ -139,51 +147,55 @@
                 vid.src = currentChap.url;
             }
 
-            vid.poster = data.info.cover;
+            vid.poster = info.cover;
+            
+            // Event Video
             vid.oncanplay = () => loader.classList.add('hidden');
             vid.onwaiting = () => loader.classList.remove('hidden');
-            
-            // Auto Next
+            vid.onerror = () => { loader.innerHTML = '<div class="text-red-500 text-xs">Video Error.</div>'; };
             vid.onended = () => {
-                if(epIndex < chapters.length) window.location.href = `/player/${bookId}/${epIndex+1}`;
+                if (EP_INDEX < chapters.length) window.location.href = `/player/${BOOK_ID}/${EP_INDEX + 1}`;
             };
 
-            // Info
-            document.getElementById('title').innerText = data.info.title;
-            document.getElementById('desc').innerText = data.info.desc || 'Tidak ada deskripsi.';
+            // Setup Info UI
+            document.getElementById('info-container').classList.remove('hidden');
+            document.getElementById('title').innerText = info.title;
+            document.getElementById('desc').innerText = info.desc || 'Tidak ada deskripsi.';
             document.getElementById('ep-idx').innerText = currentChap.index;
+            document.title = `Nonton ${info.title} Eps ${currentChap.index}`;
 
             // Tags
             const tagsEl = document.getElementById('tags');
-            if(data.info.tags) tagsEl.innerHTML = data.info.tags.slice(0,3).map(t => `<span class="bg-zinc-800 text-[10px] px-2 py-0.5 rounded text-gray-400 border border-zinc-700">${t}</span>`).join('');
+            if(info.tags) tagsEl.innerHTML = info.tags.map(t => `<span class="bg-zinc-800 text-[10px] px-2 py-0.5 rounded text-gray-400 border border-zinc-700">${t}</span>`).join('');
 
-            // Nav Buttons
+            // Navigasi Prev/Next (Link Biasa)
             const prev = document.getElementById('btn-prev');
             const next = document.getElementById('btn-next');
             
-            if(epIndex > 1) prev.href = `/player/${bookId}/${epIndex-1}`;
-            else { prev.href="#"; prev.classList.add('opacity-50', 'pointer-events-none'); }
+            if (EP_INDEX > 1) prev.href = `/player/${BOOK_ID}/${EP_INDEX - 1}`;
+            else { prev.removeAttribute('href'); prev.classList.add('opacity-50', 'cursor-not-allowed'); }
             
-            if(epIndex < chapters.length) next.href = `/player/${bookId}/${epIndex+1}`;
-            else { next.href="#"; next.classList.add('opacity-50', 'pointer-events-none'); }
+            if (EP_INDEX < chapters.length) next.href = `/player/${BOOK_ID}/${EP_INDEX + 1}`;
+            else { next.removeAttribute('href'); next.classList.add('opacity-50', 'cursor-not-allowed'); }
 
-            // Grid
+            // Grid Episode
             const grid = document.getElementById('ep-grid');
             grid.innerHTML = chapters.map(ch => `
-                <a href="/player/${bookId}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===epIndex ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>
+                <a href="/player/${BOOK_ID}/${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${ch.index===EP_INDEX ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400 hover:bg-zinc-700'}">
+                    ${ch.index}
+                </a>
             `).join('');
             
+            // Scroll ke episode aktif
             setTimeout(() => {
-                const active = grid.querySelector('.bg-red-600');
-                if(active) active.scrollIntoView({block: 'center'});
+                const activeBtn = grid.querySelector('.bg-red-600');
+                if(activeBtn) activeBtn.scrollIntoView({block: 'center', behavior: 'smooth'});
             }, 500);
 
-            updateFavBtn();
-
             // Related
-            if(data.related) {
+            if(related && related.length > 0) {
                 document.getElementById('related-sec').classList.remove('hidden');
-                document.getElementById('related-grid').innerHTML = data.related.slice(0,6).map(b => `
+                document.getElementById('related-grid').innerHTML = related.slice(0,6).map(b => `
                     <a href="/player/${b.id}/1" class="block group">
                         <div class="aspect-[2/3] bg-zinc-800 rounded overflow-hidden mb-1 relative"><img src="${b.cover}" class="w-full h-full object-cover"></div>
                         <div class="text-[10px] text-gray-400 line-clamp-1 group-hover:text-white">${b.title}</div>
@@ -191,37 +203,34 @@
                 `).join('');
             }
 
-            // SEO Update
-            document.title = `Nonton ${data.info.title} - Ep ${currentChap.index}`;
-            const schema = {
-                "@context": "https://schema.org",
-                "@type": "VideoObject",
-                "name": `${data.info.title} Episode ${currentChap.index}`,
-                "description": data.info.desc,
-                "thumbnailUrl": data.info.cover,
-                "uploadDate": new Date().toISOString(),
-                "contentUrl": vid.src
-            };
-            document.getElementById('seo-video').textContent = JSON.stringify(schema);
+            // Favorit
+            updateFavBtn(info);
         }
 
-        function toggleFav() {
-            if(!currentInfo) return;
-            const favs = getLS('db_favs');
-            if(favs[bookId]) delete favs[bookId];
-            else favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
-            setLS('db_favs', favs);
-            updateFavBtn();
+        // LocalStorage Helpers
+        function getLS(k) { return JSON.parse(localStorage.getItem(k) || '{}'); }
+        function setLS(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+
+        function saveHistory(id, info, ep) {
+            const hist = getLS('db_history');
+            hist[id] = { id, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: ep, timestamp: Date.now() };
+            setLS('db_history', hist);
         }
 
-        function updateFavBtn() {
-            const favs = getLS('db_favs');
+        function updateFavBtn(info) {
             const btn = document.getElementById('fav-btn');
-            if(favs[bookId]) btn.innerHTML = '<i class="fas fa-heart text-red-600"></i>';
-            else btn.innerHTML = '<i class="far fa-heart"></i>';
+            const favs = getLS('db_favs');
+            const isFav = !!favs[BOOK_ID];
+            
+            btn.innerHTML = isFav ? '<i class="fas fa-heart text-red-600 text-xl"></i>' : '<i class="far fa-heart text-xl"></i>';
+            
+            btn.onclick = () => {
+                if(isFav) delete favs[BOOK_ID];
+                else favs[BOOK_ID] = { id: BOOK_ID, title: info.title, cover: info.cover, episodes: info.totalEps };
+                setLS('db_favs', favs);
+                updateFavBtn(info); // Refresh icon
+            };
         }
-
-        init();
     </script>
 </body>
 </html>
