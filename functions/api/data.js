@@ -1,6 +1,7 @@
 // ============================================================================
-// 1. KONFIGURASI KREDEAL (PASTIKAN VALID)
+// 1. KONFIGURASI KREDENSIAL & KUNCI
 // ============================================================================
+
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
 nbY3irfKdkEllAU2OORnAjlXDyCzcm2Z6ZRrGvtTZUAMelfU5PWS6XGEm3d4kJEK
@@ -30,12 +31,16 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-// DATA MANUAL (GANTI DENGAN HASIL SNIFFING TERBARU JIKA EXPIRED)
+// DATA MANUAL DARI HASIL SNIFFING (Pastikan ini valid/tidak expired)
 const MANUAL_TOKEN = "ZXlKMGVYQWlPaUpLVjFRaUxDSmhiR2NpT2lKSVV6STFOaUo5LmV5SnlaV2RwYzNSbGNsUjVjR1VpT2lKVVJVMVFJaXdpZFhObGNrbGtJam96TXpZd09EUXdOVFo5LkFLMWw0d01Ud00xVndOTHBOeUlOcmtHN3dmb0czaGROMEgxNWVPZV9KaHc=";
 const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
 const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
 const MANUAL_USER_ID = "336084056";
 const APP_VERSION = "470";
+
+// URL DATABASE SERIES ANDA (Raw GitHub)
+// Tips: Gunakan jsdelivr agar lebih cepat dan tidak kena rate limit GitHub
+const SERIES_DB_URL = "https://raw.githubusercontent.com/sitijdev/drachin/refs/heads/main/public/series.json";
 
 // ============================================================================
 // 2. ROUTER HANDLER
@@ -49,109 +54,154 @@ export async function onRequest(context) {
     const bookId = url.searchParams.get("bookId");
     const keyword = url.searchParams.get("keyword");
 
-    // --- A. SEARCH DRAMA (BARU!) ---
+    // --- A. SEARCH DRAMA ---
     if (type === "search" && keyword) {
+      // 1. Cari di Database GitHub dulu (Lebih Akurat & Cepat)
+      const localData = await fetchSeriesDB();
+      const localResults = localData.filter(b => 
+        b.title.toLowerCase().includes(keyword.toLowerCase())
+      ).map(mapLocalBook);
+
+      // 2. Cari di API Dramabox (Opsional / Pelengkap)
       const payload = {
         searchSource: "搜索按钮",
-        pageNo: 1,
-        pageSize: 50,
-        from: "search_sug",
-        keyword: keyword
+        pageNo: 1, pageSize: 20, from: "search_sug", keyword: keyword
       };
       const rawData = await fetchFromDramaBox("/drama-box/search/search", payload);
-      
-      // Bersihkan data agar sesuai format frontend
-      const results = (rawData.data?.searchList || []).map(item => ({
+      const apiResults = (rawData.data?.searchList || []).map(item => ({
           id: item.bookId || item.id,
           title: item.bookName || item.title,
           cover: item.cover || item.bookCover,
-          episodes: item.chapterCount || item.totalChapter || "?",
+          episodes: item.chapterCount || "?",
           desc: item.introduction || "Hasil pencarian",
           tags: item.tags || []
       }));
 
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: results }] }, "SEARCH-API");
+      // Gabungkan (Prioritas Local)
+      const finalResults = [...localResults, ...apiResults];
+      
+      // Hapus duplikat ID
+      const uniqueResults = finalResults.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
+
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: uniqueResults }] }, "SEARCH-HYBRID");
     }
 
     // --- B. LIST DRAMA (HOME) ---
     if (type === "list") {
-      // 1. Data Featured
-      const homePayload = { isNeedRank: 1, index: 0, type: 0, channelId: 175 };
-      const homeData = await fetchFromDramaBox("/drama-box/he001/theater", homePayload);
+      const combinedSections = [];
+
+      // 1. Ambil Data "Series.json" dari GitHub (SUMBER UTAMA)
+      const localData = await fetchSeriesDB();
       
-      // 2. Data Browse (Lebih Banyak)
+      if (localData && localData.length > 0) {
+          // Bagi menjadi beberapa kategori agar tidak bosan
+          combinedSections.push({
+              title: "🔥 Rekomendasi Spesial",
+              books: localData.slice(0, 20).map(mapLocalBook)
+          });
+          
+          if (localData.length > 20) {
+             combinedSections.push({
+                title: "📺 Koleksi Terpopuler",
+                books: localData.slice(20, 60).map(mapLocalBook)
+             });
+          }
+      }
+
+      // 2. Ambil Data Live dari Dramabox (Sebagai Pelengkap)
+      // Kita gunakan endpoint 'classify' agar dapat data acak baru
       const browsePayload = { 
-          pageSize: 30, 
-          typeList: [{"type":1,"value":""},{"type":2,"value":""},{"type":4,"value":""},{"type":4,"value":""},{"type":5,"value":"2"}], 
-          pageNo: 1, 
-          showLabels: false 
+          pageSize: 20, 
+          typeList: [{"type":1,"value":""},{"type":5,"value":"2"}], 
+          pageNo: 1, showLabels: false 
       };
       const browseData = await fetchFromDramaBox("/drama-box/home/classify", browsePayload);
 
-      const combinedSections = [];
-
-      // Proses Featured
-      if (homeData.data?.columnVoList) {
-          homeData.data.columnVoList.forEach(col => {
-              if (col.bookList?.length > 0) {
-                  combinedSections.push({ title: col.title, books: mapBooks(col.bookList) });
-              }
+      if (browseData.data?.classifyBookList?.records) {
+          combinedSections.push({ 
+              title: "🆕 Update Terbaru Server", 
+              books: mapBooks(browseData.data.classifyBookList.records) 
           });
       }
-      // Proses Browse
-      if (browseData.data?.classifyBookList?.records) {
-          combinedSections.push({ title: "Jelajahi Semua", books: mapBooks(browseData.data.classifyBookList.records) });
-      }
 
-      return jsonResponse({ sections: combinedSections }, "LIST-API");
+      return jsonResponse({ sections: combinedSections }, "LIST-HYBRID");
     }
 
-    // --- C. DETAIL & CHAPTERS (VIDEO) ---
+    // --- C. DETAIL & CHAPTERS (RAHASIA UNLOCKER) ---
     if (type === "chapter" && bookId) {
-      const cacheKey = `ch_v3_${bookId}`;
+      const cacheKey = `unlock_v4_${bookId}`;
 
-      // Cek Cache
+      // Cek Cache KV
       if (env.DRAMABOX_CACHE) {
         const cached = await env.DRAMABOX_CACHE.get(cacheKey);
         if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
       }
 
-      // Cek DB D1
-      if (env.DB) {
-         const dbResult = await env.DB.prepare("SELECT * FROM chapters WHERE book_id = ? ORDER BY episode_number ASC").bind(bookId).all();
-         if (dbResult.results?.length > 0) {
-             const formatted = { chapters: dbResult.results.map(r => ({ index: r.episode_number, title: r.title, url: r.video_url })) };
-             if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(formatted), { expirationTtl: 14400 }));
-             return jsonResponse(formatted, "DB-D1");
-         }
-      }
-
-      // Fetch API (Gunakan batchDownload atau batch/load - coba batchDownload sesuai ref baru)
-      const payload = {
+      // 1. Ambil Daftar ID Chapter dulu (Pake batch/load biasa)
+      const loadPayload = {
           boundaryIndex: 0, comingPlaySectionId: -1, index: 1,
           currencyPlaySource: "discover_new_rec_new", needEndRecommend: 0,
           currencyPlaySourceName: "", preLoad: false, rid: "",
           pullCid: "", loadDirection: 0, startUpKey: "", bookId: bookId
       };
-      const rawData = await fetchFromDramaBox("/drama-box/chapterv2/batch/load", payload);
+      const loadData = await fetchFromDramaBox("/drama-box/chapterv2/batch/load", loadPayload);
 
-      if (!rawData?.data?.chapterList) {
-          return jsonResponse({ error: "Video terkunci atau tidak ditemukan." }, "ERROR");
+      if (!loadData?.data?.chapterList) {
+          return jsonResponse({ error: "Gagal memuat daftar episode." }, "ERROR-LOAD");
       }
 
-      const cleanChapters = {
-          chapters: rawData.data.chapterList.map((ch, idx) => ({
-              index: idx + 1,
-              title: ch.chapterName,
-              url: ch.cdnList?.find(c=>c.isDefault===1)?.videoPathList?.[0]?.videoPath || ch.cdnList?.[0]?.videoPathList?.[0]?.videoPath
-          })).filter(c => c.url)
+      // 2. Kumpulkan semua ID Chapter
+      const allChapterIds = loadData.data.chapterList.map(ch => ch.chapterId);
+
+      // 3. LAKUKAN "BATCH DOWNLOAD" UNTUK MEMBUKA KUNCI (INI RAHASIANYA!)
+      // Kita meminta server memberikan link download untuk SEMUA chapter sekaligus
+      const unlockPayload = {
+          bookId: bookId,
+          chapterIdList: allChapterIds
       };
+      
+      const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", unlockPayload);
 
-      // Simpan Cache
-      if (env.DB) context.waitUntil(saveToD1(env.DB, bookId, rawData));
-      if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(cleanChapters), { expirationTtl: 14400 }));
+      // 4. Mapping Hasil Unlock ke Format Kita
+      // Kita gabungkan info dari 'loadData' (nama chapter) dengan 'unlockData' (link video sakti)
+      
+      const finalChapters = [];
+      
+      // Mapping bantuan: ID -> Nama
+      const nameMap = {};
+      loadData.data.chapterList.forEach(ch => {
+          nameMap[ch.chapterId] = ch.chapterName;
+      });
 
-      return jsonResponse(cleanChapters, "UPSTREAM");
+      // Ambil video dari hasil unlock (batchDownload)
+      if (unlockData?.data?.chapterVoList) {
+          unlockData.data.chapterVoList.forEach((ch, idx) => {
+              // Cari kualitas terbaik (720p/HD) atau default
+              const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
+              const vidUrl = cdn?.videoPathList?.find(v => v.quality === 720)?.videoPath ||
+                             cdn?.videoPathList?.[0]?.videoPath;
+
+              if (vidUrl) {
+                  finalChapters.push({
+                      index: idx + 1, // Urutan
+                      title: nameMap[ch.chapterId] || `Episode ${idx+1}`,
+                      url: vidUrl
+                  });
+              }
+          });
+      }
+
+      // Sortir berdasarkan episode
+      finalChapters.sort((a, b) => a.index - b.index);
+
+      const resultData = { chapters: finalChapters };
+
+      // Simpan Cache (Agar tidak nembak API terus)
+      if (env.DRAMABOX_CACHE) {
+          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(resultData), { expirationTtl: 14400 })); // Cache 4 jam
+      }
+
+      return jsonResponse(resultData, "UNLOCK-SUCCESS");
     }
 
     return new Response("Invalid Request", { status: 400 });
@@ -165,19 +215,43 @@ export async function onRequest(context) {
 // 3. HELPER FUNCTIONS
 // ============================================================================
 
+// Fetch database JSON dari GitHub Anda
+async function fetchSeriesDB() {
+    try {
+        const res = await fetch(SERIES_DB_URL);
+        if (!res.ok) return [];
+        return await res.json();
+    } catch (e) {
+        console.error("Gagal fetch GitHub:", e);
+        return [];
+    }
+}
+
+// Mapper untuk Data Local (GitHub) -> Format Frontend
+function mapLocalBook(b) {
+    return {
+        id: b.source_id || b.id,
+        title: b.title,
+        cover: b.cover_path,
+        episodes: "Full",
+        desc: b.description,
+        tags: ["Series Pilihan"]
+    };
+}
+
+// Mapper untuk Data API Dramabox -> Format Frontend
 function mapBooks(list) {
     return list.map(b => ({
         id: b.bookId,
         title: b.bookName,
-        cover: b.coverWap || b.cover || b.imagePath || "https://via.placeholder.com/200x300?text=No+Image",
+        cover: b.coverWap || b.cover,
         episodes: b.chapterCount || "?",
-        desc: b.introduction || "Tidak ada deskripsi.",
-        tags: b.tags || b.tagV3s?.map(t => t.tagName) || []
+        desc: b.introduction || "",
+        tags: b.tags || []
     }));
 }
 
 async function fetchFromDramaBox(endpoint, payload) {
-  // SELF-SIGNING LOCAL (Lebih aman & mandiri daripada pakai API orang lain)
   const signature = await createSignature(payload, MANUAL_TOKEN, MANUAL_DEVICE_ID, MANUAL_ANDROID_ID);
   
   const headers = {
@@ -191,8 +265,7 @@ async function fetchFromDramaBox(endpoint, payload) {
     "Content-Type": "application/json; charset=UTF-8",
     "User-Agent": "okhttp/4.10.0",
     "sn": signature, 
-    "Language": "in", "Current-Language": "in", "Time-Zone": "+0700",
-    "Brand": "Xiaomi", "Md": "Redmi Note 8", "Mf": "XIAOMI", "Apn": "1", "P": "48", "Ov": "9", "Cid": "DAUAF1064291"
+    "Language": "in", "Current-Language": "in", "Time-Zone": "+0700"
   };
 
   const res = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
@@ -223,21 +296,8 @@ function importPrivateKey(pem) {
   return crypto.subtle.importKey("pkcs8", binaryDer.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
 }
 
-async function saveToD1(db, bookId, data) {
-    try {
-        const chapters = data.data.chapterList;
-        const now = Date.now();
-        await db.prepare(`INSERT OR REPLACE INTO books (book_id, updated_at) VALUES (?, ?)`).bind(bookId, now).run();
-        const stmt = db.prepare(`INSERT OR IGNORE INTO chapters (chapter_id, book_id, title, video_url, episode_number, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
-        const batch = [];
-        chapters.forEach((ch, index) => {
-            const vidUrl = ch.cdnList?.find(c => c.isDefault === 1)?.videoPathList?.[0]?.videoPath || ch.cdnList?.[0]?.videoPathList?.[0]?.videoPath;
-            if(vidUrl) batch.push(stmt.bind(ch.chapterId, bookId, ch.chapterName, vidUrl, index + 1, now));
-        });
-        if(batch.length > 0) await db.batch(batch);
-    } catch (e) { console.error("DB Error", e); }
-}
-
 function jsonResponse(data, source = "Unknown") {
-  return new Response(JSON.stringify({ ...data, _source: source }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+  return new Response(JSON.stringify({ ...data, _source: source }), {
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+  });
 }
