@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Player - Dramabox</title>
+    <meta name="theme-color" content="#000000">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #000; color: #e5e5e5; font-family: sans-serif; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        /* Rasio Vertikal untuk Drama Box */
+        .aspect-vertical { aspect-ratio: 9/16; max-height: 85vh; }
+        .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .expanded { -webkit-line-clamp: unset; }
+        /* Loading */
+        .skeleton { background: #1f1f1f; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+    </style>
+    <script type="application/ld+json" id="seo-video">{}</script>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <nav class="fixed top-0 w-full bg-black/60 backdrop-blur z-50 h-14 flex items-center px-4 justify-between">
+        <a href="/" class="text-white flex items-center gap-2 hover:text-red-500 transition">
+            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Kembali</span>
+        </a>
+        <div class="flex items-center gap-3">
+            <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden">
+            </select>
+        </div>
+    </nav>
+
+    <main class="flex-1 flex flex-col items-center pt-14 pb-10 w-full">
+        <div class="w-full max-w-2xl px-0 sm:px-4">
+            
+            <div class="w-full bg-black relative group aspect-vertical rounded-xl overflow-hidden ring-1 ring-zinc-800 shadow-2xl mx-auto">
+                <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer" preload="auto"></video>
+                
+                <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
+                    <div class="text-center">
+                        <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i>
+                        <p class="text-xs text-gray-500">Memuat Video...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-5 px-4 sm:px-0">
+                <div class="flex justify-between items-start gap-2">
+                    <h1 id="title" class="text-lg font-bold text-white leading-snug flex-1">Memuat Judul...</h1>
+                    <button onclick="toggleFav()" id="fav-btn" class="text-gray-500 hover:text-red-500 transition p-2"><i class="far fa-heart text-xl"></i></button>
+                </div>
+
+                <div class="flex items-center mt-4 gap-3 bg-zinc-900/50 p-2 rounded-xl border border-zinc-800">
+                    <a id="btn-prev" class="flex-1 py-2.5 bg-zinc-800 rounded-lg text-center text-xs font-bold text-gray-400 hover:text-white transition flex items-center justify-center gap-2 disabled:opacity-50"><i class="fas fa-step-backward"></i> Prev</a>
+                    <div class="text-center px-2">
+                        <span class="text-[10px] text-gray-500 block">EPISODE</span>
+                        <span id="ep-idx" class="text-white text-lg font-bold leading-none">-</span>
+                    </div>
+                    <a id="btn-next" class="flex-[2] py-2.5 bg-red-600 rounded-lg text-center text-sm font-bold text-white shadow-lg shadow-red-900/30 hover:bg-red-700 transition flex items-center justify-center gap-2">Lanjut <i class="fas fa-step-forward"></i></a>
+                </div>
+
+                <div class="mt-4 p-4 bg-zinc-900 rounded-xl border border-zinc-800/50">
+                    <div id="tags" class="flex flex-wrap gap-2 mb-2"></div>
+                    <p id="desc" class="text-sm text-gray-400 leading-relaxed line-clamp-3 cursor-pointer transition" onclick="this.classList.toggle('line-clamp-3'); this.classList.toggle('expanded')"></p>
+                    <div class="text-center mt-2"><i class="fas fa-chevron-down text-xs text-zinc-600"></i></div>
+                </div>
+
+                <div class="mt-6">
+                    <h3 class="text-xs uppercase text-gray-500 font-bold mb-3 flex items-center gap-2">
+                        <i class="fas fa-list"></i> Daftar Episode
+                    </h3>
+                    <div id="ep-grid" class="grid grid-cols-5 sm:grid-cols-8 gap-2 max-h-60 overflow-y-auto hide-scroll pr-1"></div>
+                </div>
+
+                 <div class="mt-8 pt-6 border-t border-zinc-800 hidden" id="related-sec">
+                    <h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Mungkin Anda Suka</h3>
+                    <div id="related-grid" class="grid grid-cols-3 gap-3"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API = "/api/data";
+        
+        // Parse URL: domain.com/player/BOOK_ID/EPISODE_INDEX
+        const pathParts = window.location.pathname.split('/'); 
+        // parts[0]="", parts[1]="player", parts[2]="BOOKID", parts[3]="EPINDEX"
+        const bookId = pathParts[2]; 
+        const epIndex = parseInt(pathParts[3]) || 1;
+
+        // LocalStorage Utils
+        const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
+        const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+        let currentInfo = null;
+
+        async function init() {
+            if(!bookId) { alert("URL Salah"); return; }
+
+            try {
+                const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
+                const json = await res.json();
+
+                if(json.error) throw new Error(json.error);
+
+                const chapters = json.chapters || [];
+                const currentChap = chapters.find(c => c.index === epIndex) || chapters[0];
+                
+                // Save Metadata to Memory & LocalStorage
+                currentInfo = json.info || {};
+                saveHistory(bookId, currentInfo, currentChap.index);
+
+                renderPlayer(json, currentChap, chapters);
+
+            } catch(e) {
+                document.getElementById('loader').innerHTML = `<div class="text-center text-red-500"><i class="fas fa-exclamation-circle text-3xl mb-2"></i><br>${e.message}<br><a href="/" class="underline mt-2 block">Kembali</a></div>`;
+            }
+        }
+
+        function renderPlayer(data, currentChap, chapters) {
+            // 1. Video Setup
+            const vid = document.getElementById('video-el');
+            const loader = document.getElementById('loader');
+            const qSelect = document.getElementById('quality-select');
+
+            // Cek Resolusi (Jika ada multiple sources)
+            if (currentChap.sources && Array.isArray(currentChap.sources)) {
+                qSelect.classList.remove('hidden');
+                qSelect.innerHTML = currentChap.sources.map(s => `<option value="${s.url}">${s.q}p</option>`).join('');
+                vid.src = currentChap.sources[0].url; // Default High Res
+                
+                qSelect.onchange = (e) => {
+                    const t = vid.currentTime;
+                    vid.src = e.target.value;
+                    vid.currentTime = t;
+                    vid.play();
+                };
+            } else {
+                vid.src = currentChap.url;
+            }
+
+            vid.poster = data.info.cover;
+            vid.oncanplay = () => loader.classList.add('hidden');
+            vid.onwaiting = () => loader.classList.remove('hidden');
+            vid.onerror = () => { loader.innerHTML = '<div class="text-red-500 text-xs">Gagal memuat video.<br>Coba refresh.</div>'; };
+
+            // Auto Next
+            vid.onended = () => {
+                if(epIndex < chapters.length) window.location.href = `/player/${bookId}/${epIndex+1}`;
+            };
+
+            // 2. UI Info
+            document.getElementById('title').innerText = data.info.title;
+            document.getElementById('desc').innerText = data.info.desc || 'Tidak ada deskripsi.';
+            document.getElementById('ep-idx').innerText = currentChap.index;
+
+            // Tags
+            const tagsEl = document.getElementById('tags');
+            if(data.info.tags) tagsEl.innerHTML = data.info.tags.slice(0,3).map(t => `<span class="bg-zinc-800 text-[10px] px-2 py-0.5 rounded text-gray-400 border border-zinc-700">${t}</span>`).join('');
+
+            // 3. Nav Buttons
+            const prev = document.getElementById('btn-prev');
+            const next = document.getElementById('btn-next');
+            
+            if(epIndex > 1) prev.href = `/player/${bookId}/${epIndex-1}`;
+            else { prev.href="#"; prev.classList.add('opacity-50', 'pointer-events-none'); }
+            
+            if(epIndex < chapters.length) next.href = `/player/${bookId}/${epIndex+1}`;
+            else { next.href="#"; next.classList.add('opacity-50', 'pointer-events-none'); }
+
+            // 4. Grid Episode
+            const grid = document.getElementById('ep-grid');
+            grid.innerHTML = chapters.map(ch => `
+                <a href="/player/${bookId}/${ch.index}" class="block text-center py-2 rounded-md text-xs font-bold border transition ${ch.index===epIndex ? 'bg-red-600 border-red-600 text-white shadow-lg shadow-red-900/40' : 'bg-zinc-800 border-transparent text-gray-400 hover:bg-zinc-700'}">
+                    ${ch.index}
+                </a>
+            `).join('');
+
+            // Scroll grid to active
+            setTimeout(() => {
+                const activeBtn = grid.querySelector('.bg-red-600');
+                if(activeBtn) activeBtn.scrollIntoView({block: 'center'});
+            }, 500);
+
+            // 5. Update Fav State
+            updateFavBtn();
+
+            // 6. Related
+            if(data.related && data.related.length > 0) {
+                const relSec = document.getElementById('related-sec');
+                const relGrid = document.getElementById('related-grid');
+                relSec.classList.remove('hidden');
+                relGrid.innerHTML = data.related.slice(0,6).map(b => `
+                    <a href="/player/${b.id}/1" class="block group">
+                        <div class="aspect-[2/3] bg-zinc-800 rounded overflow-hidden mb-1 border border-white/5 group-hover:border-red-600 transition">
+                            <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy">
+                        </div>
+                        <div class="text-[10px] text-gray-400 line-clamp-1 group-hover:text-white">${b.title}</div>
+                    </a>
+                `).join('');
+            }
+
+            // 7. SEO
+            document.title = `Nonton ${data.info.title} Eps ${currentChap.index}`;
+            const schema = {
+                "@context": "https://schema.org",
+                "@type": "VideoObject",
+                "name": `${data.info.title} Episode ${currentChap.index}`,
+                "description": data.info.desc,
+                "thumbnailUrl": data.info.cover,
+                "uploadDate": new Date().toISOString(),
+                "contentUrl": currentChap.url
+            };
+            document.getElementById('seo-video').textContent = JSON.stringify(schema);
+        }
+
+        // ACTIONS
+        function saveHistory(id, info, ep) {
+            const hist = getLS('db_history');
+            hist[id] = { id, title: info.title, cover: info.cover, episodes: info.totalEps, lastEpisode: ep, timestamp: Date.now() };
+            setLS('db_history', hist);
+        }
+
+        window.toggleFav = () => {
+            if(!currentInfo) return;
+            const favs = getLS('db_favs');
+            const btn = document.getElementById('fav-btn');
+            if(favs[bookId]) {
+                delete favs[bookId];
+                btn.innerHTML = '<i class="far fa-heart text-xl"></i>';
+                btn.classList.remove('text-red-600');
+                btn.classList.add('text-gray-500');
+            } else {
+                favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
+                btn.innerHTML = '<i class="fas fa-heart text-xl"></i>';
+                btn.classList.remove('text-gray-500');
+                btn.classList.add('text-red-600');
+            }
+            setLS('db_favs', favs);
+        }
+
+        function updateFavBtn() {
+            const favs = getLS('db_favs');
+            const btn = document.getElementById('fav-btn');
+            if(favs[bookId]) {
+                btn.innerHTML = '<i class="fas fa-heart text-xl"></i>';
+                btn.classList.remove('text-gray-500');
+                btn.classList.add('text-red-600');
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
