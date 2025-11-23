@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dramabox Unofficial</title>
+    <meta name="description" content="Nonton drama pendek sub Indo gratis.">
     <meta name="theme-color" content="#0f0f0f">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -15,6 +16,7 @@
         .glass-bottom { background: rgba(0, 0, 0, 0.95); border-top: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
         .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        /* Animasi Skeleton */
         .skeleton { background: linear-gradient(90deg, #1f1f1f 25%, #2a2a2a 50%, #1f1f1f 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     </style>
@@ -30,8 +32,8 @@
         </div>
         <div class="relative">
             <input type="text" id="search-input" placeholder="Cari drama..." 
-                class="bg-zinc-800/80 border border-zinc-700/50 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 transition w-40 sm:w-60 text-white placeholder-gray-500">
-            <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs"></i>
+                class="bg-zinc-800/80 border border-zinc-700/50 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 transition w-36 sm:w-56 text-white placeholder-gray-500">
+            <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs pointer-events-none"></i>
         </div>
     </nav>
 
@@ -39,10 +41,18 @@
 
     <nav class="fixed bottom-0 w-full glass-bottom z-50 h-16 pb-safe">
         <div class="max-w-lg mx-auto h-full flex justify-around items-center px-2">
-            <button onclick="switchTab('home')" class="nav-btn w-16 text-red-500" id="tab-home"><i class="fas fa-home text-xl mb-1"></i><br><span class="text-[10px]">Beranda</span></button>
-            <button onclick="switchTab('favorites')" class="nav-btn w-16 text-gray-500" id="tab-favorites"><i class="fas fa-heart text-xl mb-1"></i><br><span class="text-[10px]">Favorit</span></button>
-            <button onclick="switchTab('history')" class="nav-btn w-16 text-gray-500" id="tab-history"><i class="fas fa-clock-rotate-left text-xl mb-1"></i><br><span class="text-[10px]">Riwayat</span></button>
-            <button onclick="switchTab('account')" class="nav-btn w-16 text-gray-500" id="tab-account"><i class="fas fa-user text-xl mb-1"></i><br><span class="text-[10px]">Akun</span></button>
+            <button onclick="switchTab('home')" class="nav-btn w-16 text-red-500" id="tab-home">
+                <i class="fas fa-home text-xl mb-1"></i><br><span class="text-[10px]">Beranda</span>
+            </button>
+            <button onclick="switchTab('favorites')" class="nav-btn w-16 text-gray-500" id="tab-favorites">
+                <i class="fas fa-heart text-xl mb-1"></i><br><span class="text-[10px]">Favorit</span>
+            </button>
+            <button onclick="switchTab('history')" class="nav-btn w-16 text-gray-500" id="tab-history">
+                <i class="fas fa-clock-rotate-left text-xl mb-1"></i><br><span class="text-[10px]">Riwayat</span>
+            </button>
+            <button onclick="switchTab('account')" class="nav-btn w-16 text-gray-500" id="tab-account">
+                <i class="fas fa-user text-xl mb-1"></i><br><span class="text-[10px]">Akun</span>
+            </button>
         </div>
     </nav>
 
@@ -51,10 +61,9 @@
         let currentTab = 'home';
         let homeData = null;
 
-        // Utils LocalStorage
         const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
 
-        // Fungsi Ganti Tab
+        // FUNGSI GANTI TAB (Menu Bawah)
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('.nav-btn').forEach(b => {
@@ -64,18 +73,17 @@
             render();
         }
 
-        // Fungsi Render Halaman
+        // FUNGSI RENDER UTAMA
         async function render() {
             const app = document.getElementById('app');
             app.innerHTML = '';
             
-            // --- TAB BERANDA ---
+            // --- TAB HOME ---
             if(currentTab === 'home') {
-                // Jika data belum ada, ambil dulu (Fetch)
                 if(!homeData) {
-                    // Tampilkan Skeleton Loading
+                    // Skeleton Loading
                     app.innerHTML = `
-                        <div class="space-y-6 pt-4">
+                        <div class="space-y-6 pt-4 animate-pulse">
                             <div class="h-6 w-32 bg-zinc-800 rounded skeleton"></div>
                             <div class="grid grid-cols-3 gap-3">
                                 <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
@@ -88,14 +96,13 @@
                         const res = await fetch(`${API}?type=list`);
                         const json = await res.json();
                         homeData = json.sections;
-                        render(); // <--- PENTING: Render ulang setelah data didapat!
+                        render(); // PENTING: Render ulang setelah data masuk!
                     } catch(e) { 
-                        app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat data. Cek koneksi.</div>'; 
+                        app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat data.</div>'; 
                     }
-                    return; // Stop di sini, tunggu fetch selesai
+                    return;
                 }
                 
-                // Jika data sudah ada, Tampilkan!
                 if(homeData && homeData.length) {
                     homeData.forEach(sec => {
                         if(!sec.books.length) return;
@@ -129,6 +136,7 @@
                     app.innerHTML += `<div class="grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in">${data.map(b => createCard(b, currentTab==='history')).join('')}</div>`;
                 }
             }
+            
             // --- TAB AKUN ---
             else {
                 app.innerHTML = `
@@ -143,16 +151,18 @@
             }
         }
 
-        // FUNGSI MEMBUAT KARTU (LINK NORMAL)
+        // FUNGSI MEMBUAT KARTU (LINK BIASA)
         function createCard(b, isHistory=false) {
+            // URL Target: /player/ID/EPS
             let url = `/player/${b.id}/1`;
             if(isHistory && b.lastEpisode) url = `/player/${b.id}/${b.lastEpisode}`;
             
-            // PERHATIKAN: Tidak ada onclick="navigate(...)". Ini link biasa.
+            // PENTING: Ini link biasa <a href>. Tidak ada onclick="navigate".
+            // Browser akan reload dan membuka halaman player secara fisik.
             return `
             <a href="${url}" class="block group relative transition transform active:scale-95">
                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
-                    <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
+                    <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://via.placeholder.com/200x300'">
                     <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes||'?'} Eps</div>
                     ${isHistory ? `<div class="absolute bottom-0 left-0 w-full h-1 bg-gray-700"><div class="bg-red-600 h-full" style="width: ${(b.lastEpisode/(parseInt(b.episodes)||100))*100}%"></div></div>` : ''}
                 </div>
