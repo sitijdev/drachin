@@ -109,26 +109,85 @@ export async function onRequest(context) {
           chapterIdList: allChapterIds
       });
 
-      // 3. Mapping Video (AMBIL SEMUA KUALITAS)
+      // 3. Mapping Video (AMBIL SEMUA KUALITAS + SUBTITLE + AUDIO)
+      // videoMap akan menyimpan entry per chapter key: { sources: [{q,url,lang?}], subtitles: [{lang,url}], audioTracks: [{lang,url}] }
       const videoMap = {};
       if (unlockData?.data?.chapterVoList) {
           unlockData.data.chapterVoList.forEach(ch => {
-              // Tentukan kandidat key yang mungkin dipakai (ch.chapterId, ch.id, ch.chapter_id)
+              // kandidat key yang mungkin ada di response
               const keys = [];
-              if (ch.chapterId !== undefined) keys.push(ch.chapterId);
-              if (ch.chapter_id !== undefined) keys.push(ch.chapter_id);
-              if (ch.id !== undefined) keys.push(ch.id);
+              if (ch.chapterId !== undefined && ch.chapterId !== null) keys.push(ch.chapterId);
+              if (ch.chapter_id !== undefined && ch.chapter_id !== null) keys.push(ch.chapter_id);
+              if (ch.id !== undefined && ch.id !== null) keys.push(ch.id);
 
+              // cari cdn yang default atau fallback ke yang pertama
               const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              if (cdn && cdn.videoPathList) {
-                  const sourcesArr = cdn.videoPathList.map(v => ({
-                      q: v.quality,
-                      url: v.videoPath
-                  })).sort((a, b) => b.q - a.q); // Urut dari kualitas tertinggi
 
-                  // Simpan sources untuk semua kandidat key (sebagai string) agar lookup konsisten
+              // sources (video quality list)
+              let sourcesArr = [];
+              if (cdn && Array.isArray(cdn.videoPathList) && cdn.videoPathList.length) {
+                  sourcesArr = cdn.videoPathList.map(v => ({
+                      q: v.quality || (v.q ? Number(v.q) : 0),
+                      url: v.videoPath || v.url || v.path || v.src,
+                      // kadang ada property language/lang
+                      lang: v.language || v.lang || null,
+                      type: v.type || null
+                  })).filter(s => s.url).sort((a, b) => (b.q || 0) - (a.q || 0));
+              }
+
+              // subtitles detection (various possible shapes)
+              let subtitles = [];
+              const candidateSubLists = [
+                  cdn?.subtitleList, cdn?.srtList, ch?.subtitleList, ch?.subtitles, ch?.srtList, ch?.sub
+              ];
+              for (const s of candidateSubLists) {
+                  if (!s) continue;
+                  if (Array.isArray(s) && s.length) {
+                      s.forEach(it => {
+                          if (!it) return;
+                          if (typeof it === 'string') {
+                              subtitles.push({ lang: 'und', url: it });
+                          } else {
+                              const urlCandidate = it.url || it.path || it.srt || it.subtitlePath || it.uri;
+                              const langCandidate = it.lang || it.language || it.code || it.label || 'und';
+                              if (urlCandidate) subtitles.push({ lang: langCandidate, url: urlCandidate });
+                          }
+                      });
+                      break;
+                  }
+              }
+
+              // audioTracks detection (various possible shapes)
+              let audioTracks = [];
+              const candidateAudioLists = [
+                  cdn?.audioPathList, ch?.audioList, ch?.audios, cdn?.audioList
+              ];
+              for (const a of candidateAudioLists) {
+                  if (!a) continue;
+                  if (Array.isArray(a) && a.length) {
+                      a.forEach(it => {
+                          if (!it) return;
+                          if (typeof it === 'string') {
+                              audioTracks.push({ lang: 'und', url: it });
+                          } else {
+                              const urlCandidate = it.url || it.path || it.audioPath || it.uri;
+                              const langCandidate = it.lang || it.language || it.code || it.label || 'und';
+                              if (urlCandidate) audioTracks.push({ lang: langCandidate, url: urlCandidate });
+                          }
+                      });
+                      break;
+                  }
+              }
+
+              // Simpan hasil mapping untuk setiap kandidat key (sebagai string)
+              if (keys.length) {
                   keys.forEach(k => {
-                      if (k !== undefined && k !== null) videoMap[String(k)] = sourcesArr;
+                      if (k === undefined || k === null) return;
+                      videoMap[String(k)] = {
+                          sources: sourcesArr || [],
+                          subtitles: subtitles || [],
+                          audioTracks: audioTracks || []
+                      };
                   });
               }
           });
@@ -137,28 +196,34 @@ export async function onRequest(context) {
       // 4. Susun finalChapters: masukkan SEMUA chapter (jangan skip yang tak ada sources)
       const finalChapters = [];
       liveChapterList.forEach(ch => {
+          // bentuk key candidates dari live list (beberapa API beda property name)
           const keyCandidates = [ch.id, ch.chapterId, ch.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
-          let sources = null;
+          let mapped = null;
           for (const k of keyCandidates) {
               if (!k) continue;
-              if (videoMap[k]) { sources = videoMap[k]; break; }
+              if (videoMap[k]) { mapped = videoMap[k]; break; }
           }
 
           const chapterObj = {
               index: ch.index,
-              title: ch.name || `Episode ${ch.index}`
+              title: ch.name || ch.chapterName || `Episode ${ch.index}`,
+              sources: [],
+              subtitles: [],
+              audioTracks: []
           };
 
-          if (sources && sources.length) {
-              chapterObj.sources = sources;
-          } else if (ch.mp4) {
-              // fallback ke mp4 kalau tersedia
-              chapterObj.sources = [{ q: 480, url: ch.mp4 }];
-          } else {
-              // Tidak ada sumber — tapi masukkan sebagai episode dengan array kosong
-              chapterObj.sources = [];
+          if (mapped) {
+              if (Array.isArray(mapped.sources) && mapped.sources.length) chapterObj.sources = mapped.sources;
+              if (Array.isArray(mapped.subtitles) && mapped.subtitles.length) chapterObj.subtitles = mapped.subtitles;
+              if (Array.isArray(mapped.audioTracks) && mapped.audioTracks.length) chapterObj.audioTracks = mapped.audioTracks;
           }
 
+          // fallback: jika tidak ada mapped sources, gunakan ch.mp4 jika ada
+          if ((!chapterObj.sources || chapterObj.sources.length === 0) && ch.mp4) {
+              chapterObj.sources = [{ q: 480, url: ch.mp4 }];
+          }
+
+          // chapter tetap dimasukkan, walau sources kosong - UI harus menanganinya (disabled / not playable)
           finalChapters.push(chapterObj);
       });
 
@@ -182,6 +247,7 @@ export async function onRequest(context) {
           }))
       };
 
+      // simpan ke cache KV jika tersedia
       if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
 
       return jsonResponse(result, "SUCCESS");
