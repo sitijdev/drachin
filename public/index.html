@@ -63,7 +63,7 @@
 
         const getLS = (k) => JSON.parse(localStorage.getItem(k)||'{}');
 
-        // FUNGSI GANTI TAB (Menu Bawah)
+        // FUNGSI GANTI TAB
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('.nav-btn').forEach(b => {
@@ -96,7 +96,7 @@
                         const res = await fetch(`${API}?type=list`);
                         const json = await res.json();
                         homeData = json.sections;
-                        render(); // PENTING: Render ulang setelah data masuk!
+                        render(); 
                     } catch(e) { 
                         app.innerHTML = '<div class="text-center py-20 text-red-500">Gagal memuat data.</div>'; 
                     }
@@ -151,14 +151,15 @@
             }
         }
 
-        // FUNGSI MEMBUAT KARTU (LINK BIASA)
+        // FUNGSI MEMBUAT KARTU (LINK SEO FRIENDLY)
         function createCard(b, isHistory=false) {
-            // URL Target: /player/ID/EPS
-            let url = `/player/${b.id}/1`;
-            if(isHistory && b.lastEpisode) url = `/player/${b.id}/${b.lastEpisode}`;
+            // Tentukan episode target: kalau ada history pakai lastEpisode, kalau tidak pakai 1
+            let targetEp = 1;
+            if (isHistory && b.lastEpisode) targetEp = b.lastEpisode;
+
+            // Format URL: /player/BOOKID-CHAPTERID (Contoh: /player/1005-3)
+            const url = `/player/${b.id}-${targetEp}`;
             
-            // PENTING: Ini link biasa <a href>. Tidak ada onclick="navigate".
-            // Browser akan reload dan membuka halaman player secara fisik.
             return `
             <a href="${url}" class="block group relative transition transform active:scale-95">
                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
@@ -170,7 +171,7 @@
             </a>`;
         }
 
-        // Search
+        // Search Logic
         document.getElementById('search-input').addEventListener('keypress', async (e) => {
             if(e.key === 'Enter') {
                 const q = e.target.value;
@@ -185,7 +186,6 @@
             }
         });
 
-        // Render Awal
         render();
     </script>
 </body>
