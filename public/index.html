@@ -3,258 +3,229 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dramabox Unofficial</title>
+    <title>Dramabox - Nonton Drama Pendek Gratis</title>
+    <meta name="description" content="Nonton drama pendek sub Indo gratis. Koleksi lengkap drama romantis, aksi, dan fantasi.">
+    <link rel="canonical" href="/" />
+    <meta property="og:title" content="Dramabox Unofficial" />
+    <meta property="og:description" content="Nonton drama pendek terbaik." />
+    <meta property="og:image" content="https://via.placeholder.com/1200x630?text=Dramabox" />
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* Custom Scrollbar ala Mobile */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #1a1a1a; }
-        ::-webkit-scrollbar-thumb { background: #e50914; border-radius: 4px; }
-        
-        .poster-aspect { aspect-ratio: 2/3; }
-        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        body { background-color: #0f0f0f; color: #e5e5e5; }
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        .aspect-poster { aspect-ratio: 2/3; }
+        .glass-nav { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(10px); }
     </style>
+    <script type="application/ld+json" id="seo-json-ld">{}</script>
 </head>
-<body class="bg-black text-gray-100 font-sans antialiased pb-20">
+<body class="antialiased pb-20">
 
-    <nav class="fixed top-0 w-full bg-black/90 backdrop-blur z-50 border-b border-gray-800">
-        <div class="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
-            <h1 class="text-2xl font-bold text-red-600 tracking-tighter cursor-pointer" onclick="goHome()">
-                <i class="fas fa-play-circle"></i> DRAMABOX
-            </h1>
-            <div id="loading-indicator" class="hidden">
-                <i class="fas fa-circle-notch fa-spin text-white"></i>
-            </div>
+    <nav class="fixed top-0 w-full glass-nav z-50 border-b border-white/10">
+        <div class="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+            <a href="/" onclick="event.preventDefault(); goHome()" class="flex items-center gap-2">
+                <i class="fas fa-play-circle text-red-600 text-2xl"></i>
+                <span class="font-bold tracking-tight text-lg">DRAMABOX</span>
+            </a>
+            <div id="loading" class="hidden"><i class="fas fa-circle-notch fa-spin text-red-600"></i></div>
         </div>
     </nav>
 
-    <main class="max-w-4xl mx-auto mt-16 min-h-screen">
+    <main class="max-w-5xl mx-auto mt-14 min-h-screen">
         
-        <div id="view-home" class="p-4">
-            <div id="columns-container" class="space-y-8"></div>
-        </div>
+        <div id="view-home" class="p-4 space-y-8 animate-fade-in">
+            </div>
 
-        <div id="view-detail" class="hidden bg-zinc-900 min-h-screen relative">
-            <button onclick="goHome()" class="absolute top-4 left-4 z-10 bg-black/50 p-2 rounded-full text-white hover:bg-red-600 transition">
-                <i class="fas fa-arrow-left"></i>
+        <div id="view-detail" class="hidden relative bg-[#141414] min-h-screen pb-10">
+            <button onclick="goHome()" class="absolute top-4 left-4 z-20 bg-black/50 p-3 rounded-full hover:bg-red-600 transition backdrop-blur-sm">
+                <i class="fas fa-arrow-left text-white"></i>
             </button>
 
-            <div class="relative w-full h-64 overflow-hidden">
-                <img id="detail-cover-bg" src="" class="w-full h-full object-cover opacity-30 blur-md">
-                <div class="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent"></div>
-            </div>
-
-            <div class="px-5 -mt-20 relative flex gap-4">
-                <img id="detail-cover" src="" class="w-32 rounded-lg shadow-2xl border border-gray-700 poster-aspect object-cover bg-gray-800">
+            <div class="relative h-[50vh] w-full overflow-hidden">
+                <img id="d-cover-bg" src="" class="w-full h-full object-cover opacity-40 blur-xl scale-110">
+                <div class="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/50 to-transparent"></div>
                 
-                <div class="pt-24 flex-1">
-                    <h2 id="detail-title" class="text-xl font-bold text-white leading-tight mb-1">Judul Drama</h2>
-                    <div class="flex items-center text-xs text-gray-400 gap-3 mb-2">
-                        <span><i class="fas fa-layer-group text-red-500"></i> <span id="detail-eps">0</span> Eps</span>
-                        <span><i class="fas fa-eye text-red-500"></i> <span id="detail-views">0</span></span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="px-5 mt-4">
-                <p id="detail-desc" class="text-sm text-gray-400 line-clamp-3" onclick="this.classList.toggle('line-clamp-3')">
-                    Deskripsi drama...
-                </p>
-            </div>
-
-            <div class="p-5 pb-20">
-                <h3 class="font-bold mb-4 text-lg border-l-4 border-red-600 pl-3">Episode List</h3>
-                <div id="chapters-grid" class="grid grid-cols-4 sm:grid-cols-5 gap-3">
-                    </div>
-            </div>
-        </div>
-
-        <div id="view-player" class="hidden fixed inset-0 z-[100] bg-black flex flex-col justify-center items-center">
-            <button onclick="closePlayer()" class="absolute top-4 left-4 text-white text-xl z-10 p-2 bg-black/50 rounded-full">
-                <i class="fas fa-times"></i> Close
-            </button>
-            
-            <div class="w-full max-w-4xl aspect-[9/16] sm:aspect-video bg-black relative">
-                <video id="video-player" controls autoplay class="w-full h-full object-contain"></video>
-            </div>
-            <div class="mt-4 text-center px-4">
-                <h4 id="player-title" class="text-lg font-semibold">Playing...</h4>
-            </div>
-        </div>
-
-    </main>
-
-    <script>
-        const API_BASE = "/api/data";
-        
-        // Cache data drama di memory browser agar navigasi cepat
-        let cachedData = null;
-
-        // --- NAVIGATION FUNCTIONS ---
-
-        function goHome() {
-            document.getElementById('view-home').classList.remove('hidden');
-            document.getElementById('view-detail').classList.add('hidden');
-            document.getElementById('view-player').classList.add('hidden');
-            window.scrollTo(0, 0);
-        }
-
-        function showLoading(show) {
-            const el = document.getElementById('loading-indicator');
-            if(show) el.classList.remove('hidden');
-            else el.classList.add('hidden');
-        }
-
-        // --- HOME: LOAD DRAMA LIST ---
-
-        async function loadHome() {
-            if (cachedData) return renderHome(cachedData);
-
-            showLoading(true);
-            try {
-                // Request ke Worker kita
-                const res = await fetch(`${API_BASE}?type=list`);
-                const json = await res.json();
-                
-                if (json.data && json.data.columnVoList) {
-                    cachedData = json.data.columnVoList;
-                    renderHome(cachedData);
-                } else {
-                    alert("Gagal memuat data (Format JSON berbeda)");
-                    console.log(json);
-                }
-            } catch (e) {
-                alert("Error Network: " + e.message);
-            }
-            showLoading(false);
-        }
-
-        function renderHome(columnList) {
-            const container = document.getElementById('columns-container');
-            container.innerHTML = '';
-
-            columnList.forEach(col => {
-                if (!col.bookList || col.bookList.length === 0) return;
-
-                // Buat Section per Kategori
-                const section = document.createElement('div');
-                section.innerHTML = `
-                    <h3 class="text-lg font-bold mb-3 px-2 border-l-4 border-red-600 ml-1">${col.title}</h3>
-                    <div class="flex overflow-x-auto gap-4 px-2 pb-4 hide-scrollbar snap-x">
-                        ${col.bookList.map(book => createBookCard(book)).join('')}
-                    </div>
-                `;
-                container.appendChild(section);
-            });
-
-            // Event Listener untuk klik poster
-            document.querySelectorAll('.book-card').forEach(card => {
-                card.addEventListener('click', () => {
-                    const bookData = JSON.parse(decodeURIComponent(card.dataset.book));
-                    openDetail(bookData);
-                });
-            });
-        }
-
-        function createBookCard(book) {
-            // Data buku disimpan di dataset attribute agar bisa diambil saat klik
-            const bookString = encodeURIComponent(JSON.stringify(book));
-            
-            return `
-                <div class="book-card flex-none w-32 sm:w-40 cursor-pointer snap-start transition hover:scale-105" data-book="${bookString}">
-                    <div class="relative rounded-lg overflow-hidden poster-aspect bg-gray-800">
-                        <img src="${book.cover}" loading="lazy" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/200x300?text=No+Image'">
-                        <div class="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">
-                            ${book.chapterCount} Eps
+                <div class="absolute bottom-0 left-0 w-full p-6 flex gap-5 items-end">
+                    <img id="d-cover" src="" class="w-32 rounded-lg shadow-2xl border border-white/20 aspect-poster object-cover bg-zinc-800">
+                    <div class="flex-1 mb-2">
+                        <div id="d-tags" class="flex flex-wrap gap-2 mb-2 text-[10px] font-medium text-gray-300"></div>
+                        <h1 id="d-title" class="text-2xl md:text-4xl font-extrabold text-white leading-tight drop-shadow-lg mb-2"></h1>
+                        <div class="flex items-center gap-4 text-sm text-gray-300">
+                            <span class="bg-red-600 text-white px-2 py-0.5 rounded text-xs font-bold">HD</span>
+                            <span><i class="fas fa-layer-group text-red-500"></i> <span id="d-eps">0</span> Eps</span>
                         </div>
                     </div>
-                    <div class="mt-2">
-                        <h4 class="font-medium text-sm line-clamp-2 leading-snug text-gray-200">${book.bookName}</h4>
-                    </div>
                 </div>
-            `;
-        }
+            </div>
 
-        // --- DETAIL: SHOW INFO & LOAD CHAPTERS ---
+            <div class="px-6 mt-2">
+                <p id="d-desc" class="text-gray-400 text-sm leading-relaxed line-clamp-3 cursor-pointer" onclick="this.classList.toggle('line-clamp-3')"></p>
+            </div>
 
-        async function openDetail(book) {
-            // 1. Isi Info Statis (Judul, Gambar, Deskripsi) dari data List
-            document.getElementById('detail-title').innerText = book.bookName;
-            document.getElementById('detail-desc').innerText = book.introduction || "Tidak ada deskripsi.";
-            document.getElementById('detail-cover').src = book.cover;
-            document.getElementById('detail-cover-bg').src = book.cover;
-            document.getElementById('detail-eps').innerText = book.chapterCount;
-            document.getElementById('detail-views').innerText = book.playCount || "-";
+            <div class="px-6 mt-8">
+                <h3 class="text-lg font-bold mb-4 border-l-4 border-red-600 pl-3">Daftar Episode</h3>
+                <div id="d-chapters" class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                    </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="player-overlay" class="hidden fixed inset-0 z-[100] bg-black flex items-center justify-center">
+        <div class="w-full h-full max-w-screen-md max-h-screen-md aspect-[9/16] bg-black relative">
+            <video id="vid-player" controls autoplay playsinline class="w-full h-full object-contain bg-black"></video>
+            <button onclick="closePlayer()" class="absolute top-4 right-4 text-white bg-black/60 p-2 rounded-full z-10">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const API = "/api/data";
+        let homeData = null;
+
+        // Router Sederhana
+        window.onpopstate = (e) => {
+            if(e.state?.view === 'detail') renderDetail(e.state.data);
+            else goHome(false);
+        };
+
+        async function init() {
+            const params = new URLSearchParams(window.location.search);
+            const dramaId = params.get('drama');
             
-            // Reset Grid
-            const grid = document.getElementById('chapters-grid');
-            grid.innerHTML = '<div class="col-span-full text-center py-10"><i class="fas fa-circle-notch fa-spin text-red-600 text-2xl"></i><p class="mt-2 text-gray-500">Memuat episode...</p></div>';
-
-            // Ganti View
-            document.getElementById('view-home').classList.add('hidden');
-            document.getElementById('view-detail').classList.remove('hidden');
-            window.scrollTo(0, 0);
-
-            // 2. Fetch Chapter List dari Backend
-            try {
-                const res = await fetch(`${API_BASE}?type=chapter&bookId=${book.bookId}`);
-                const json = await res.json();
-
-                grid.innerHTML = ''; // Clear loading
-
-                if (json.data && json.data.chapterList) {
-                    json.data.chapterList.forEach((ch, index) => {
-                        // Cari link video
-                        const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-                        const vidUrl = cdn?.videoPathList?.find(v => v.isDefault === 1)?.videoPath;
-                        const isLocked = !vidUrl; // Kalau null berarti dikunci (tapi script kita biasanya dapat semua krn token sakti)
-
-                        const btn = document.createElement('button');
-                        btn.className = `p-3 rounded-lg text-sm font-bold transition ${isLocked ? 'bg-gray-800 text-gray-500 cursor-not-allowed' : 'bg-gray-800 hover:bg-red-600 text-white'}`;
-                        btn.innerText = index + 1;
-                        
-                        if (!isLocked) {
-                            btn.onclick = () => openPlayer(vidUrl, ch.chapterName);
-                        }
-
-                        grid.appendChild(btn);
-                    });
-                } else {
-                    grid.innerHTML = '<p class="col-span-full text-center text-red-500">Gagal memuat episode.</p>';
-                }
-
-            } catch (e) {
-                grid.innerHTML = `<p class="col-span-full text-center text-red-500">Error: ${e.message}</p>`;
+            await loadHomeData();
+            
+            if (dramaId && homeData) {
+                // Cari buku di data home
+                let foundBook = null;
+                homeData.forEach(sec => {
+                    const b = sec.books.find(x => x.id == dramaId);
+                    if(b) foundBook = b;
+                });
+                if(foundBook) openDetail(foundBook, false);
             }
         }
 
-        // --- PLAYER: VIDEO OVERLAY ---
-
-        function openPlayer(url, title) {
-            const playerView = document.getElementById('view-player');
-            const video = document.getElementById('video-player');
-            
-            document.getElementById('player-title').innerText = title;
-            video.src = url;
-            playerView.classList.remove('hidden');
-            video.play().catch(e => console.log("Auto-play blocked"));
+        async function loadHomeData() {
+            document.getElementById('loading').classList.remove('hidden');
+            try {
+                const res = await fetch(`${API}?type=list`);
+                const json = await res.json();
+                homeData = json.sections || [];
+                renderHome();
+            } catch(e) { console.error(e); }
+            document.getElementById('loading').classList.add('hidden');
         }
 
-        function closePlayer() {
-            const playerView = document.getElementById('view-player');
-            const video = document.getElementById('video-player');
+        function renderHome() {
+            const container = document.getElementById('view-home');
+            container.innerHTML = '';
             
-            video.pause();
-            video.src = "";
-            playerView.classList.add('hidden');
+            homeData.forEach(sec => {
+                if(!sec.books.length) return;
+                const secEl = document.createElement('section');
+                secEl.innerHTML = `
+                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <span class="w-1 h-6 bg-red-600 rounded-full"></span> ${sec.title}
+                    </h2>
+                    <div class="flex overflow-x-auto gap-4 pb-4 hide-scroll snap-x">
+                        ${sec.books.map(b => `
+                            <div onclick="selectBook('${encodeURIComponent(JSON.stringify(b))}')" 
+                                 class="flex-none w-32 snap-start cursor-pointer group relative">
+                                <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 border border-white/5 group-hover:border-red-600/50 transition">
+                                    <img src="${b.cover}" class="w-full h-full object-cover group-hover:scale-110 transition duration-500" loading="lazy">
+                                    <div class="absolute top-1 right-1 bg-black/70 text-[10px] px-1.5 py-0.5 rounded text-white font-bold">${b.episodes} Eps</div>
+                                </div>
+                                <h3 class="text-xs font-medium text-gray-300 group-hover:text-white line-clamp-2">${b.title}</h3>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                container.appendChild(secEl);
+            });
         }
 
-        // Init
-        loadHome();
+        window.selectBook = (str) => openDetail(JSON.parse(decodeURIComponent(str)));
 
+        function openDetail(book, push = true) {
+            if(push) {
+                history.pushState({view: 'detail', data: book}, book.title, `?drama=${book.id}`);
+            }
+            renderDetail(book);
+            updateSEO(book);
+        }
+
+        function renderDetail(book) {
+            document.getElementById('view-home').classList.add('hidden');
+            document.getElementById('view-detail').classList.remove('hidden');
+            window.scrollTo(0,0);
+
+            // Isi Data
+            document.getElementById('d-cover').src = book.cover;
+            document.getElementById('d-cover-bg').src = book.cover;
+            document.getElementById('d-title').innerText = book.title;
+            document.getElementById('d-desc').innerText = book.desc;
+            document.getElementById('d-eps').innerText = book.episodes;
+            
+            const tagsEl = document.getElementById('d-tags');
+            tagsEl.innerHTML = book.tags.map(t => `<span class="bg-white/10 px-2 py-1 rounded">${t}</span>`).join('');
+
+            // Load Chapters
+            const chapCont = document.getElementById('d-chapters');
+            chapCont.innerHTML = '<div class="col-span-full text-center py-10"><i class="fas fa-circle-notch fa-spin"></i> Memuat...</div>';
+
+            fetch(`${API}?type=chapter&bookId=${book.id}`)
+                .then(r => r.json())
+                .then(json => {
+                    chapCont.innerHTML = '';
+                    if(!json.chapters) return;
+                    json.chapters.forEach(ch => {
+                        const btn = document.createElement('button');
+                        btn.className = "bg-zinc-800 hover:bg-red-600 text-gray-300 hover:text-white py-3 rounded-lg font-bold text-sm transition";
+                        btn.innerText = ch.index;
+                        btn.onclick = () => playVideo(ch.url);
+                        chapCont.appendChild(btn);
+                    });
+                });
+        }
+
+        function playVideo(url) {
+            const v = document.getElementById('vid-player');
+            v.src = url;
+            document.getElementById('player-overlay').classList.remove('hidden');
+            v.play();
+        }
+
+        window.closePlayer = () => {
+            const v = document.getElementById('vid-player');
+            v.pause(); v.src = '';
+            document.getElementById('player-overlay').classList.add('hidden');
+        }
+
+        window.goHome = (push = true) => {
+            if(push) history.pushState({view: 'home'}, 'Home', '/');
+            document.getElementById('view-detail').classList.add('hidden');
+            document.getElementById('view-home').classList.remove('hidden');
+            document.title = "Dramabox Unofficial";
+        }
+
+        // SEO Helper: Update JSON-LD & Title
+        function updateSEO(book) {
+            document.title = `${book.title} - Nonton Gratis`;
+            const schema = {
+                "@context": "https://schema.org",
+                "@type": "TVSeries",
+                "name": book.title,
+                "image": book.cover,
+                "description": book.desc,
+                "numberOfEpisodes": book.episodes
+            };
+            document.getElementById('seo-json-ld').textContent = JSON.stringify(schema);
+        }
+
+        init();
     </script>
 </body>
 </html>
