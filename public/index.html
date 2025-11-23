@@ -5,199 +5,388 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dramabox Unofficial</title>
     <meta name="description" content="Nonton drama pendek sub Indo gratis.">
+    <meta name="theme-color" content="#0f0f0f">
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { background-color: #0f0f0f; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: #0f0f0f; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .aspect-poster { aspect-ratio: 2/3; }
-        /* Player Vertikal Rasio 9:16 */
         .aspect-vertical-video { aspect-ratio: 9/16; }
-        .glass-nav { background: rgba(0, 0, 0, 0.95); border-bottom: 1px solid rgba(255,255,255,0.1); }
-        
-        /* Line clamp untuk deskripsi */
+        .glass-nav { background: rgba(0, 0, 0, 0.95); border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .glass-bottom { background: rgba(0, 0, 0, 0.95); border-top: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
+        .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
         .expanded { -webkit-line-clamp: unset; }
+        
+        /* Animasi Loading Skeleton */
+        .skeleton { background: linear-gradient(90deg, #1f1f1f 25%, #2a2a2a 50%, #1f1f1f 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     </style>
     <script type="application/ld+json" id="seo-schema">{}</script>
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen flex flex-col pb-20">
 
-    <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 max-w-5xl mx-auto left-0 right-0">
+    <nav class="fixed top-0 w-full glass-nav z-50 h-14 flex items-center justify-between px-4 transition-all duration-300" id="navbar">
         <div id="nav-left" class="flex items-center">
-            <a href="/" onclick="navigate(event)" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
-                <i class="fas fa-play-circle text-2xl"></i>
+            <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
+                <i class="fas fa-play-circle text-2xl drop-shadow-md"></i>
                 <span class="font-bold text-lg tracking-wide hidden sm:block">DRAMABOX</span>
             </a>
         </div>
-        
         <div id="search-container" class="relative">
-            <input type="text" id="search-input" placeholder="Cari..." 
-                class="bg-zinc-800 border border-zinc-700 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 transition w-32 sm:w-48 text-white placeholder-gray-500">
-            <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs"></i>
+            <input type="text" id="search-input" placeholder="Cari drama..." 
+                class="bg-zinc-800/80 border border-zinc-700/50 rounded-full px-4 py-1.5 text-sm focus:outline-none focus:border-red-600 focus:bg-zinc-800 transition w-36 sm:w-56 text-white placeholder-gray-500">
+            <i class="fas fa-search absolute right-3 top-2 text-gray-500 text-xs pointer-events-none"></i>
         </div>
     </nav>
 
-    <main id="app" class="flex-1 pt-16 pb-20 px-4 max-w-2xl mx-auto w-full">
+    <main id="app" class="flex-1 pt-16 px-3 sm:px-4 max-w-5xl mx-auto w-full min-h-screen">
         </main>
 
+    <nav class="fixed bottom-0 w-full glass-bottom z-50 h-16 pb-safe">
+        <div class="max-w-lg mx-auto h-full flex justify-around items-center px-2">
+            <button onclick="switchTab('home')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-red-500" id="tab-home">
+                <i class="fas fa-home text-xl mb-0.5 transition group-active:scale-90"></i>
+                <span class="text-[10px] font-medium">Beranda</span>
+            </button>
+            
+            <button onclick="switchTab('favorites')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-favorites">
+                <i class="fas fa-heart text-xl mb-0.5 transition group-active:scale-90"></i>
+                <span class="text-[10px] font-medium">Favorit</span>
+            </button>
+
+            <button onclick="switchTab('history')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-history">
+                <i class="fas fa-clock-rotate-left text-xl mb-0.5 transition group-active:scale-90"></i>
+                <span class="text-[10px] font-medium">Riwayat</span>
+            </button>
+
+            <button onclick="switchTab('account')" class="nav-btn group flex flex-col items-center gap-1 w-16 text-gray-500 hover:text-gray-300" id="tab-account">
+                <i class="fas fa-user text-xl mb-0.5 transition group-active:scale-90"></i>
+                <span class="text-[10px] font-medium">Akun</span>
+            </button>
+        </div>
+    </nav>
+
     <template id="tpl-home">
-        <div class="space-y-8 animate-fade-in pb-10">
-            <div id="home-content"></div>
+        <div id="home-container" class="space-y-8 animate-fade-in pb-20">
+            <div id="home-skeleton" class="space-y-6">
+                <div class="h-6 w-32 bg-zinc-800 rounded skeleton"></div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
+                    <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
+                    <div class="aspect-poster bg-zinc-800 rounded-lg skeleton"></div>
+                </div>
+            </div>
         </div>
     </template>
 
+    <template id="tpl-grid-item">
+        <a href="" onclick="navigate(event, this.href)" class="group relative block cursor-pointer transition-transform active:scale-95">
+            <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition relative">
+                <img src="" class="w-full h-full object-cover transition duration-500 group-hover:scale-110" loading="lazy" onerror="this.src='https://placehold.co/200x300/1a1a1a/FFF?text=No+Image'">
+                <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow flex items-center gap-1">
+                    <i class="fas fa-layer-group text-[8px] text-red-500"></i> <span class="ep-count"></span>
+                </div>
+                <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                    <div class="bg-red-600/90 p-3 rounded-full backdrop-blur-sm shadow-lg transform scale-50 group-hover:scale-100 transition">
+                        <i class="fas fa-play text-white text-lg ml-1"></i>
+                    </div>
+                </div>
+                <div class="progress-container hidden absolute bottom-0 left-0 w-full h-1 bg-gray-700/50">
+                     <div class="progress-bar h-full bg-red-600" style="width: 0%"></div>
+                </div>
+            </div>
+            <h3 class="book-title text-xs font-medium text-gray-300 group-hover:text-white line-clamp-2 leading-tight min-h-[2.5em]"></h3>
+        </a>
+    </template>
+
     <template id="tpl-player">
-        <div class="flex flex-col gap-6">
+        <div class="flex flex-col gap-5 max-w-xl mx-auto pb-10">
             
-            <div class="w-full max-w-sm mx-auto bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-zinc-800 relative group aspect-vertical-video">
+            <div class="w-full bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-zinc-800 relative group aspect-vertical-video mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
                 
-                <div id="video-loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
-                     <i class="fas fa-circle-notch fa-spin text-red-600 text-3xl"></i>
+                <div id="video-loader" class="absolute inset-0 flex items-center justify-center bg-black z-10 pointer-events-none">
+                     <div class="flex flex-col items-center gap-2">
+                        <i class="fas fa-circle-notch fa-spin text-red-600 text-3xl"></i>
+                        <span class="text-xs text-gray-500">Memuat Video...</span>
+                     </div>
                 </div>
             </div>
 
-            <div class="flex justify-between items-center gap-4 max-w-sm mx-auto w-full">
-                <a id="btn-prev" href="#" class="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2">
-                    <i class="fas fa-step-backward"></i> Prev
-                </a>
-                <div class="text-xs text-gray-500 font-mono">EPS <span id="ep-display" class="text-white text-lg font-bold">1</span></div>
-                <a id="btn-next" href="#" class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2">
-                    Next <i class="fas fa-step-forward"></i>
-                </a>
-            </div>
-
-            <div class="bg-zinc-900/50 p-5 rounded-xl border border-zinc-800">
-                <h1 id="drama-title" class="text-xl font-bold text-white leading-tight mb-2">Judul Drama</h1>
-                
-                <div class="flex flex-wrap gap-2 mb-3 text-xs">
-                    <span class="bg-white/10 px-2 py-0.5 rounded text-gray-300"><i class="fas fa-eye text-red-500 mr-1"></i> <span id="meta-views">0</span></span>
-                    <span class="bg-white/10 px-2 py-0.5 rounded text-gray-300"><i class="fas fa-layer-group text-red-500 mr-1"></i> <span id="meta-eps">0</span> Eps</span>
+            <div class="flex flex-col gap-4">
+                <div class="flex justify-between items-start gap-4">
+                    <div class="flex-1">
+                        <h1 id="drama-title" class="text-lg sm:text-xl font-bold text-white leading-tight mb-1"></h1>
+                        <div class="flex items-center gap-3 text-xs text-gray-400">
+                            <span class="bg-white/10 px-2 py-0.5 rounded"><i class="fas fa-eye text-red-500 mr-1"></i> <span id="meta-views">-</span></span>
+                            <span class="bg-white/10 px-2 py-0.5 rounded"><i class="fas fa-clock text-red-500 mr-1"></i> Ep <span id="ep-display">1</span></span>
+                        </div>
+                    </div>
+                    <button id="btn-fav" onclick="toggleFavorite()" class="p-3 rounded-full bg-zinc-800 hover:bg-zinc-700 text-gray-400 transition active:scale-90">
+                        <i class="far fa-heart text-xl"></i>
+                    </button>
                 </div>
-                
-                <div id="meta-tags" class="flex flex-wrap gap-2 mb-3"></div>
-                
-                <p id="drama-desc" class="text-sm text-gray-400 leading-relaxed line-clamp-3 cursor-pointer transition-colors hover:text-gray-300" onclick="this.classList.toggle('line-clamp-3'); this.classList.toggle('expanded')">
-                    Deskripsi...
-                </p>
-            </div>
 
-            <div>
-                <h3 class="text-white font-bold mb-3 text-sm uppercase tracking-wider text-gray-500 flex items-center gap-2">
-                    <i class="fas fa-list"></i> Daftar Episode
-                </h3>
-                <div id="ep-grid" class="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto pr-1 custom-scroll">
-                    </div>
-            </div>
+                <div class="flex items-center gap-2 bg-zinc-900/80 p-1.5 rounded-xl border border-zinc-800">
+                    <a id="btn-prev" href="#" class="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-center text-xs font-bold text-gray-300 transition flex items-center justify-center gap-2">
+                        <i class="fas fa-backward"></i> Prev
+                    </a>
+                    <a id="btn-next" href="#" class="flex-[2] py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-red-900/20">
+                        Lanjut Eps Berikutnya <i class="fas fa-forward"></i>
+                    </a>
+                </div>
 
-            <div id="related-section" class="hidden border-t border-zinc-800 pt-6">
-                <h3 class="text-white font-bold mb-4 text-sm uppercase tracking-wider text-gray-500">Mungkin Anda Suka</h3>
-                <div id="related-grid" class="grid grid-cols-3 gap-3">
+                <div class="bg-zinc-900/40 p-4 rounded-xl border border-zinc-800/50">
+                    <div id="meta-tags" class="flex flex-wrap gap-2 mb-3"></div>
+                    <p id="drama-desc" class="text-sm text-gray-400 leading-relaxed line-clamp-3 cursor-pointer hover:text-gray-300 active:text-white transition-colors" onclick="this.classList.toggle('line-clamp-3'); this.classList.toggle('expanded')">
+                        Deskripsi...
+                    </p>
+                    <div class="text-center mt-2">
+                        <i class="fas fa-chevron-down text-gray-600 text-xs animate-bounce"></i>
                     </div>
+                </div>
+
+                <div>
+                    <h3 class="text-white font-bold mb-3 text-sm uppercase tracking-wider text-gray-500 flex items-center gap-2 border-b border-white/5 pb-2">
+                        <i class="fas fa-list-ol text-red-600"></i> Daftar Episode
+                    </h3>
+                    <div id="ep-grid" class="grid grid-cols-5 sm:grid-cols-8 gap-2 max-h-60 overflow-y-auto pr-1 custom-scroll"></div>
+                </div>
+
+                <div id="related-section" class="hidden pt-4 mt-4 border-t border-zinc-800">
+                    <h3 class="text-white font-bold mb-4 text-sm uppercase tracking-wider text-gray-500">Rekomendasi Lainnya</h3>
+                    <div id="related-grid" class="grid grid-cols-3 gap-3"></div>
+                </div>
             </div>
+        </div>
+    </template>
+
+    <template id="tpl-account">
+        <div class="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 animate-fade-in">
+            <div class="w-24 h-24 bg-zinc-800 rounded-full flex items-center justify-center mb-4 ring-4 ring-zinc-800 shadow-xl">
+                <i class="fas fa-user-astronaut text-4xl text-gray-400"></i>
+            </div>
+            <h2 class="text-xl font-bold text-white mb-2">Pengguna Tamu</h2>
+            <p class="text-gray-500 text-sm max-w-xs mx-auto mb-6">Simpan progres nontonmu di perangkat ini secara otomatis.</p>
+            
+            <div class="w-full max-w-sm space-y-3">
+                <button onclick="alert('Fitur akan segera hadir!')" class="w-full py-3 bg-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-700 transition flex items-center justify-between px-4">
+                    <span><i class="fas fa-cog mr-2 text-gray-400"></i> Pengaturan</span>
+                    <i class="fas fa-chevron-right text-xs text-gray-600"></i>
+                </button>
+                 <button onclick="localStorage.clear(); location.reload()" class="w-full py-3 bg-red-900/20 text-red-500 border border-red-900/30 rounded-lg text-sm font-medium hover:bg-red-900/30 transition">
+                    <i class="fas fa-trash-alt mr-2"></i> Hapus Data Riwayat
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-empty">
+        <div class="flex flex-col items-center justify-center py-20 text-gray-500 animate-fade-in">
+            <i class="fas fa-ghost text-4xl mb-3 opacity-50"></i>
+            <p class="text-sm">Belum ada data di sini.</p>
+            <button onclick="switchTab('home')" class="mt-4 px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-full">Mulai Nonton</button>
         </div>
     </template>
 
     <script>
         const API_BASE = "/api/data";
-        let homeCache = null;
+        
+        // STATE MANAGEMENT (MEMORY)
+        // Kita simpan data list di memory agar saat bolak-balik tab tidak fetch ulang (Cepat!)
+        let store = {
+            homeData: null,
+            currentBook: null,
+            currentTab: 'home'
+        };
+
+        // LOCAL STORAGE HELPERS
+        const LS_KEYS = { HISTORY: 'db_history', FAVS: 'db_favs' };
+        
+        const getLS = (key) => JSON.parse(localStorage.getItem(key) || '{}');
+        const setLS = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
         // --- ROUTER ---
         async function router() {
             const path = window.location.pathname;
             
-            // Setup Navbar Back Button logic
-            const navLeft = document.getElementById('nav-left');
-            if (path !== '/' && path !== '/index.html') {
-                navLeft.innerHTML = `
-                    <a href="/" onclick="navigate(event)" class="flex items-center gap-2 text-gray-300 hover:text-white transition">
-                        <i class="fas fa-arrow-left"></i> <span class="font-bold">Kembali</span>
-                    </a>`;
-            } else {
-                navLeft.innerHTML = `
-                    <a href="/" onclick="navigate(event)" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
-                        <i class="fas fa-play-circle text-2xl"></i>
-                        <span class="font-bold text-lg tracking-wide hidden sm:block">DRAMABOX</span>
-                    </a>`;
-            }
-
-            // Route Player
+            // Handle Player Route: /player/BOOKID/CHAPTER
             const playerMatch = path.match(/^\/player\/(\d+)\/(\d+)$/);
             if (playerMatch) {
+                updateNavbar('back'); // Tampilkan tombol back
+                updateBottomNav(null); // Hide active bottom nav
                 await renderPlayer(playerMatch[1], parseInt(playerMatch[2]));
-            } else {
-                await renderHome();
-            }
-        }
-
-        window.navigate = (e) => {
-            const link = e.currentTarget;
-            if (link.href) {
-                e.preventDefault();
-                history.pushState({}, "", link.href);
-                router();
-            }
-        };
-        window.onpopstate = router;
-
-        // --- PAGES ---
-
-        async function renderHome() {
-            const app = document.getElementById('app');
-            // Jika cache ada, langsung render biar cepat
-            if (homeCache) {
-                renderHomeContent(homeCache);
                 return;
             }
 
-            app.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fas fa-circle-notch fa-spin text-red-600 text-2xl"></i> Memuat...</div>';
+            // Handle Tabs (Default Home)
+            updateNavbar('home');
+            updateBottomNav(store.currentTab);
+
+            if (store.currentTab === 'home') await renderHome();
+            else if (store.currentTab === 'favorites') renderFavorites();
+            else if (store.currentTab === 'history') renderHistory();
+            else if (store.currentTab === 'account') renderAccount();
+        }
+
+        window.navigate = (e, url) => {
+            e.preventDefault();
+            if (url !== window.location.href) {
+                history.pushState({}, "", url);
+                router();
+            }
+        };
+
+        window.switchTab = (tabName) => {
+            store.currentTab = tabName;
+            // Jika di player, kembali ke root URL
+            if (window.location.pathname.includes('/player/')) {
+                history.pushState({}, "", "/");
+            }
+            router();
+        };
+
+        window.onpopstate = router;
+
+        // --- UI UPDATERS ---
+        function updateNavbar(mode) {
+            const navLeft = document.getElementById('nav-left');
+            const search = document.getElementById('search-container');
+            
+            if (mode === 'back') {
+                navLeft.innerHTML = `
+                    <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-gray-300 hover:text-white transition py-2">
+                        <i class="fas fa-arrow-left text-lg"></i> <span class="font-bold text-sm">Kembali</span>
+                    </a>`;
+                search.classList.add('hidden'); // Sembunyikan search di player agar bersih
+            } else {
+                navLeft.innerHTML = `
+                    <a href="/" onclick="navigate(event, '/')" class="flex items-center gap-2 text-red-600 transition">
+                        <i class="fas fa-play-circle text-2xl"></i>
+                        <span class="font-bold text-lg tracking-wide hidden sm:block">DRAMABOX</span>
+                    </a>`;
+                search.classList.remove('hidden');
+            }
+        }
+
+        function updateBottomNav(activeTab) {
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('text-red-500', 'text-gray-500');
+                if (btn.id === `tab-${activeTab}`) {
+                    btn.classList.add('text-red-500');
+                    btn.querySelector('i').classList.add('mb-1'); // Efek naik dikit
+                } else {
+                    btn.classList.add('text-gray-500');
+                }
+            });
+        }
+
+        // --- PAGE RENDERING ---
+
+        // 1. HOME
+        async function renderHome() {
+            const app = document.getElementById('app');
+            
+            // Gunakan Cache Memory jika ada (Super Cepat)
+            if (store.homeData) {
+                renderHomeContent(store.homeData);
+                return;
+            }
+
+            // Show Skeleton
+            const tpl = document.getElementById('tpl-home').content.cloneNode(true);
+            app.innerHTML = '';
+            app.appendChild(tpl);
 
             try {
                 const res = await fetch(`${API_BASE}?type=list`);
                 const json = await res.json();
-                homeCache = json.sections || [];
-                renderHomeContent(homeCache);
+                store.homeData = json.sections || [];
+                renderHomeContent(store.homeData);
             } catch (e) {
-                app.innerHTML = `<div class="text-center text-red-500">Gagal: ${e.message}</div>`;
+                app.innerHTML = `<div class="text-center text-red-500 py-20">Gagal memuat: ${e.message}</div>`;
             }
         }
 
         function renderHomeContent(sections) {
-            const app = document.getElementById('app');
-            const tpl = document.getElementById('tpl-home').content.cloneNode(true);
-            const container = tpl.getElementById('home-content');
-            
-            let html = '';
+            const container = document.getElementById('home-container');
+            if(!container) return;
+            container.innerHTML = ''; // Clear skeleton
+
             sections.forEach(sec => {
                 if (!sec.books.length) return;
-                html += `
-                    <section>
-                        <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3">${sec.title}</h2>
-                        <div class="grid grid-cols-3 gap-3">
-                            ${sec.books.map(b => `
-                                <a href="/player/${b.id}/1" onclick="navigate(event)" class="group relative block">
-                                    <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition">
-                                        <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy">
-                                        <div class="absolute top-1 right-1 bg-black/80 text-[9px] px-1.5 py-0.5 rounded text-white font-bold">${b.episodes} Eps</div>
-                                    </div>
-                                    <h3 class="text-xs font-medium text-gray-300 group-hover:text-white line-clamp-2 leading-tight">${b.title}</h3>
-                                </a>
-                            `).join('')}
-                        </div>
-                    </section>
+                const sectionDiv = document.createElement('section');
+                sectionDiv.innerHTML = `
+                    <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3 flex items-center gap-2">
+                        ${sec.title} <i class="fas fa-chevron-right text-xs text-gray-600"></i>
+                    </h2>
+                    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 sm:gap-4 content-grid"></div>
                 `;
+                
+                const grid = sectionDiv.querySelector('.content-grid');
+                sec.books.forEach(book => grid.appendChild(createGridItem(book)));
+                container.appendChild(sectionDiv);
             });
-            container.innerHTML = html;
-            app.innerHTML = '';
-            app.appendChild(tpl);
-            document.title = "Dramabox Unofficial";
         }
 
+        // 2. FAVORITES & HISTORY (Local Data)
+        function renderFavorites() {
+            const app = document.getElementById('app');
+            app.innerHTML = '<h2 class="text-xl font-bold text-white mb-6 px-1">Favorit Saya</h2>';
+            
+            const favs = getLS(LS_KEYS.FAVS);
+            const list = Object.values(favs); // Convert object to array
+
+            if (list.length === 0) {
+                app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true));
+                return;
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in';
+            list.forEach(book => grid.appendChild(createGridItem(book)));
+            app.appendChild(grid);
+        }
+
+        function renderHistory() {
+            const app = document.getElementById('app');
+            app.innerHTML = '<h2 class="text-xl font-bold text-white mb-6 px-1">Riwayat Tontonan</h2>';
+            
+            const hist = getLS(LS_KEYS.HISTORY);
+            // Sort by timestamp descending (terbaru di atas)
+            const list = Object.values(hist).sort((a, b) => b.timestamp - a.timestamp);
+
+            if (list.length === 0) {
+                app.appendChild(document.getElementById('tpl-empty').content.cloneNode(true));
+                return;
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'grid grid-cols-3 sm:grid-cols-4 gap-3 animate-fade-in';
+            list.forEach(book => grid.appendChild(createGridItem(book, true))); // true = show progress
+            app.appendChild(grid);
+        }
+
+        // 3. ACCOUNT
+        function renderAccount() {
+            const app = document.getElementById('app');
+            app.innerHTML = '';
+            app.appendChild(document.getElementById('tpl-account').content.cloneNode(true));
+        }
+
+        // 4. PLAYER
         async function renderPlayer(bookId, chapterIndex) {
             const app = document.getElementById('app');
-            app.innerHTML = '<div class="text-center py-60 text-gray-500"><i class="fas fa-circle-notch fa-spin text-red-600 text-3xl"></i><br>Menyiapkan Episode...</div>';
+            app.innerHTML = ''; // Clear previous content
+            
+            // Render Skeleton Loading Player
+            app.innerHTML = `<div class="max-w-xl mx-auto pt-10 text-center">
+                <div class="aspect-vertical-video bg-zinc-900 rounded-xl skeleton mb-4"></div>
+                <div class="h-6 w-3/4 bg-zinc-800 rounded skeleton mx-auto"></div>
+            </div>`;
 
             try {
                 const res = await fetch(`${API_BASE}?type=chapter&bookId=${bookId}`);
@@ -208,122 +397,227 @@
                 const chapters = json.chapters || [];
                 const currentChap = chapters.find(c => c.index === chapterIndex) || chapters[0];
                 const info = json.info || {};
+                
+                // Simpan ke Store untuk akses global
+                store.currentBook = { ...info, id: bookId };
 
-                // Render Template
+                // Simpan Riwayat (History) - AUTO SAVE
+                saveToHistory(bookId, info, currentChap.index);
+
+                // Render Real Player
+                app.innerHTML = '';
                 const tpl = document.getElementById('tpl-player').content.cloneNode(true);
 
-                // 1. Video
-                const videoEl = tpl.getElementById('video-el');
-                const loader = tpl.getElementById('video-loader');
-                videoEl.src = currentChap.url;
-                videoEl.poster = info.cover || '';
-                videoEl.oncanplay = () => loader.classList.add('hidden');
-                videoEl.onwaiting = () => loader.classList.remove('hidden');
-                // Auto-Next Feature
-                videoEl.onended = () => {
-                     if(chapterIndex < chapters.length) {
-                         const nextUrl = `/player/${bookId}/${chapterIndex + 1}`;
-                         history.pushState({}, "", nextUrl);
-                         router();
-                     }
+                // Setup Video
+                const vid = tpl.getElementById('video-el');
+                vid.src = currentChap.url;
+                vid.poster = info.cover;
+                
+                // Loading handler
+                vid.oncanplay = () => { 
+                    tpl.getElementById('video-loader')?.classList.add('hidden'); 
+                };
+                vid.onwaiting = () => {
+                    tpl.getElementById('video-loader')?.classList.remove('hidden');
+                };
+                
+                // Auto Next
+                vid.onended = () => {
+                    if (chapterIndex < chapters.length) {
+                        const nextLink = `/player/${bookId}/${chapterIndex + 1}`;
+                        history.pushState({}, "", nextLink);
+                        router();
+                    }
                 };
 
-                // 2. Navigasi
-                tpl.getElementById('ep-display').innerText = currentChap.index;
-                const btnPrev = tpl.getElementById('btn-prev');
-                const btnNext = tpl.getElementById('btn-next');
-
-                if (chapterIndex > 1) {
-                    btnPrev.href = `/player/${bookId}/${chapterIndex - 1}`;
-                    btnPrev.onclick = navigate;
-                } else {
-                    btnPrev.classList.add('opacity-50', 'pointer-events-none');
-                }
-
-                if (chapterIndex < chapters.length) {
-                    btnNext.href = `/player/${bookId}/${chapterIndex + 1}`;
-                    btnNext.onclick = navigate;
-                } else {
-                    btnNext.classList.add('opacity-50', 'pointer-events-none');
-                }
-
-                // 3. Metadata & SEO
-                tpl.getElementById('drama-title').innerText = info.title || 'Drama';
+                // Setup Info
+                tpl.getElementById('drama-title').innerText = info.title;
                 tpl.getElementById('drama-desc').innerText = info.desc || 'Tidak ada deskripsi.';
-                tpl.getElementById('meta-views').innerText = info.views || '-';
+                tpl.getElementById('meta-views').innerText = info.views || '12k';
                 tpl.getElementById('meta-eps').innerText = info.totalEps || chapters.length;
-                
+                tpl.getElementById('ep-display').innerText = currentChap.index;
+
+                // Setup Tags
                 const tagsEl = tpl.getElementById('meta-tags');
                 if(info.tags) tagsEl.innerHTML = info.tags.map(t => `<span class="bg-zinc-800 border border-zinc-700 text-[10px] px-2 py-1 rounded text-gray-400">${t}</span>`).join('');
 
-                updateSEO(info, currentChap);
+                // Setup Fav Button State
+                const favBtn = tpl.getElementById('btn-fav');
+                const favs = getLS(LS_KEYS.FAVS);
+                if (favs[bookId]) {
+                    favBtn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl"></i>'; // Solid heart
+                }
 
-                // 4. Grid Episode
+                // Navigasi Prev/Next
+                const btnPrev = tpl.getElementById('btn-prev');
+                const btnNext = tpl.getElementById('btn-next');
+                
+                if (chapterIndex > 1) {
+                    btnPrev.href = `/player/${bookId}/${chapterIndex - 1}`;
+                    btnPrev.onclick = (e) => navigate(e, btnPrev.href);
+                } else btnPrev.classList.add('opacity-50', 'pointer-events-none');
+
+                if (chapterIndex < chapters.length) {
+                    btnNext.href = `/player/${bookId}/${chapterIndex + 1}`;
+                    btnNext.onclick = (e) => navigate(e, btnNext.href);
+                } else btnNext.classList.add('opacity-50', 'pointer-events-none');
+
+                // Grid Episode
                 const grid = tpl.getElementById('ep-grid');
-                grid.innerHTML = chapters.map(ch => `
-                    <a href="/player/${bookId}/${ch.index}" onclick="navigate(event)" 
-                       class="block text-center py-2 rounded border ${ch.index == chapterIndex ? 'bg-red-600 text-white border-red-600' : 'bg-zinc-800 text-gray-400 border-zinc-700 hover:border-white'} text-xs font-bold transition">
-                       ${ch.index}
-                    </a>
-                `).join('');
+                // Gunakan fragment agar performa lebih cepat
+                const fragment = document.createDocumentFragment();
+                chapters.forEach(ch => {
+                    const a = document.createElement('a');
+                    a.href = `/player/${bookId}/${ch.index}`;
+                    a.onclick = (e) => navigate(e, a.href);
+                    a.className = `block text-center py-3 rounded-lg text-xs font-bold transition border ${ch.index === chapterIndex ? 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-900/50' : 'bg-zinc-800 text-gray-400 border-transparent hover:bg-zinc-700 hover:text-white'}`;
+                    a.innerText = ch.index;
+                    fragment.appendChild(a);
+                });
+                grid.appendChild(fragment);
 
-                // 5. Related
-                if (json.related && json.related.length > 0) {
+                // Related Videos (Ambil dari homeData secara acak untuk simulasi)
+                if (store.homeData && store.homeData.length > 0) {
                     const relSec = tpl.getElementById('related-section');
                     const relGrid = tpl.getElementById('related-grid');
                     relSec.classList.remove('hidden');
-                    relGrid.innerHTML = json.related.slice(0, 6).map(b => `
-                         <a href="/player/${b.id}/1" onclick="navigate(event)" class="group block">
-                            <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2">
-                                <img src="${b.cover}" class="w-full h-full object-cover">
-                            </div>
-                            <h4 class="text-xs font-medium text-gray-400 line-clamp-1">${b.title}</h4>
-                        </a>
-                    `).join('');
+                    
+                    // Ambil semua buku, flat map, shuffle, ambil 6
+                    const allBooks = store.homeData.flatMap(s => s.books).filter(b => b.id != bookId);
+                    const randomRelated = allBooks.sort(() => 0.5 - Math.random()).slice(0, 6);
+                    
+                    randomRelated.forEach(b => relGrid.appendChild(createGridItem(b)));
                 }
 
-                app.innerHTML = '';
                 app.appendChild(tpl);
-                window.scrollTo(0, 0);
+                
+                // Scroll ke active episode di grid
+                setTimeout(() => {
+                     const activeEp = grid.querySelector('.bg-red-600');
+                     if(activeEp) activeEp.scrollIntoView({behavior: 'smooth', block: 'center'});
+                }, 500);
+
+                document.title = `Nonton ${info.title} - Eps ${currentChap.index}`;
 
             } catch (e) {
-                app.innerHTML = `<div class="text-center py-40 text-red-500">Error: ${e.message}</div>`;
+                app.innerHTML = `<div class="text-center py-40 text-gray-400">
+                    <i class="fas fa-exclamation-circle text-4xl mb-2 text-red-500"></i><br>
+                    ${e.message}
+                    <br><a href="/" onclick="navigate(event, '/')" class="underline mt-4 block">Kembali ke Beranda</a>
+                </div>`;
             }
         }
 
-        // --- SEO Helper ---
-        function updateSEO(info, chap) {
-            document.title = `Nonton ${info.title} Episode ${chap.index} Sub Indo`;
-            const schema = {
-                "@context": "https://schema.org",
-                "@type": "VideoObject",
-                "name": `${info.title} Episode ${chap.index}`,
-                "description": info.desc,
-                "thumbnailUrl": info.cover,
-                "uploadDate": new Date().toISOString(),
-                "contentUrl": chap.url
-            };
-            document.getElementById('seo-schema').textContent = JSON.stringify(schema);
+        // --- COMPONENTS ---
+
+        function createGridItem(book, showProgress = false) {
+            const tpl = document.getElementById('tpl-grid-item').content.cloneNode(true);
+            const a = tpl.querySelector('a');
+            const img = tpl.querySelector('img');
+            
+            // Tentukan link: Jika history, lanjut ke episode terakhir. Jika tidak, ke ep 1.
+            let linkUrl = `/player/${book.id}/1`;
+            if (showProgress && book.lastEpisode) {
+                linkUrl = `/player/${book.id}/${book.lastEpisode}`;
+            }
+
+            a.href = linkUrl;
+            img.src = book.cover;
+            tpl.querySelector('.ep-count').innerText = (book.episodes || '?') + ' Eps';
+            tpl.querySelector('.book-title').innerText = book.title;
+
+            if (showProgress && book.lastEpisode) {
+                const progContainer = tpl.querySelector('.progress-container');
+                const progBar = tpl.querySelector('.progress-bar');
+                progContainer.classList.remove('hidden');
+                
+                // Hitung persentase (Dummy logic jika total eps tidak ada, anggap 100)
+                let total = parseInt(book.episodes) || 100; 
+                let pct = (book.lastEpisode / total) * 100;
+                progBar.style.width = `${pct}%`;
+                
+                // Tambah label "Eps X"
+                const tag = tpl.querySelector('.ep-count').parentNode;
+                tag.innerHTML = `<i class="fas fa-history text-red-500 mr-1"></i> Eps ${book.lastEpisode}`;
+            }
+
+            return tpl;
         }
 
-        // Search Listener
+        // --- ACTIONS ---
+
+        function saveToHistory(bookId, info, epIndex) {
+            const hist = getLS(LS_KEYS.HISTORY);
+            hist[bookId] = {
+                id: bookId,
+                title: info.title,
+                cover: info.cover,
+                episodes: info.totalEps,
+                lastEpisode: epIndex,
+                timestamp: Date.now()
+            };
+            setLS(LS_KEYS.HISTORY, hist);
+        }
+
+        window.toggleFavorite = () => {
+            if (!store.currentBook) return;
+            const book = store.currentBook;
+            const favs = getLS(LS_KEYS.FAVS);
+            const btn = document.getElementById('btn-fav');
+
+            if (favs[book.id]) {
+                delete favs[book.id];
+                btn.innerHTML = '<i class="far fa-heart text-xl"></i>'; // Outline
+            } else {
+                favs[book.id] = {
+                    id: book.id,
+                    title: book.title,
+                    cover: book.cover,
+                    episodes: book.totalEps
+                };
+                btn.innerHTML = '<i class="fas fa-heart text-red-600 text-xl transition transform scale-125"></i>'; // Solid
+            }
+            setLS(LS_KEYS.FAVS, favs);
+        };
+
+        // Search Handler
         document.getElementById('search-input').addEventListener('keypress', async (e) => {
             if (e.key === 'Enter') {
                 const q = e.target.value;
-                const app = document.getElementById('app');
-                app.innerHTML = '<div class="text-center py-20">Mencari...</div>';
+                if(!q) return;
+                
+                // Pindah ke tab home dulu
+                switchTab('home');
+                const container = document.getElementById('home-container');
+                container.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fas fa-search fa-spin"></i> Mencari...</div>';
+                
                 try {
                     const res = await fetch(`${API_BASE}?type=search&keyword=${encodeURIComponent(q)}`);
                     const json = await res.json();
-                    homeCache = json.sections;
-                    renderHomeContent(homeCache);
-                    history.pushState({}, "", "/");
+                    
+                    // Render hasil pencarian sebagai satu section
+                    container.innerHTML = '';
+                    const secDiv = document.createElement('div');
+                    secDiv.innerHTML = `
+                        <h2 class="text-lg font-bold text-white mb-4">Hasil: "${q}"</h2>
+                        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 content-grid"></div>
+                    `;
+                    const grid = secDiv.querySelector('.content-grid');
+                    
+                    if (json.sections && json.sections[0].books.length > 0) {
+                        json.sections[0].books.forEach(b => grid.appendChild(createGridItem(b)));
+                    } else {
+                        secDiv.innerHTML += '<p class="text-gray-500 text-sm">Tidak ditemukan.</p>';
+                    }
+                    container.appendChild(secDiv);
+
                 } catch(err) { console.error(err); }
             }
         });
 
-        // Start
+        // Init
         router();
+
     </script>
 </body>
 </html>
