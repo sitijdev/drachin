@@ -201,11 +201,11 @@ async function fetchBackupFromObfuscatedWorker(bookId, chapterId, desiredQuality
   if (!full || !Array.isArray(full.chapterList)) return null;
 
   // find chapter
-  const ch = full.chapterList.find(x => String(x.chapterId) === String(chapterId));
-  if (!ch) {
-    // try by index fallback
-    const maybe = full.chapterList.find(x => String(x.index) === String(chapterId));
-    if (maybe) ch = maybe;
+  let ch = full.chapterList.find(x => String(x.chapterId) === String(chapterId));
+if (!ch) {
+  // fallback: coba cari berdasarkan index (beberapa dataset pakai index saja)
+  const maybe = full.chapterList.find(x => String(x.index) === String(chapterId));
+  if (maybe) ch = maybe;
     else return null;
   }
 
