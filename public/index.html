@@ -8,28 +8,86 @@
     <meta name="theme-color" content="#0f0f0f">
 
     <!-- ROUTE HANDLER: jika path dimulai dengan /player/ then load player/index.html content
-         Supaya slug (contoh /player/41000107913-1) tetap ada tetapi yang dijalankan adalah halaman player -->
+         Menggunakan DOMParser + eksekusi skrip aman (module) supaya tidak terjadi document.write
+         dan tidak mengeksekusi ulang Tailwind CDN/duplikat deklarasi global -->
     <script>
       (function(){
         try {
-          if (location.pathname.startsWith('/player/')) {
-            // ambil file player/index.html dari server (relative ke public/)
-            fetch('/player/index.html', {cache: 'no-store'})
-              .then(resp => {
-                if (!resp.ok) throw new Error('Gagal mengambil player page');
-                return resp.text();
-              })
-              .then(html => {
-                // ganti seluruh dokumen dengan isi player page (URL tetap sama)
-                document.open();
-                document.write(html);
-                document.close();
-              })
-              .catch(() => {
-                // jika gagal, biarkan SPA root tampil (atau tampilkan pesan)
-                console.warn('Fallback: tidak bisa load player page, menampilkan beranda.');
+          if (!location.pathname.startsWith('/player/')) return;
+
+          // ambil file player/index.html
+          fetch('/player/index.html', { cache: 'no-store' })
+            .then(resp => {
+              if (!resp.ok) throw new Error('Gagal mengambil player page');
+              return resp.text();
+            })
+            .then(html => {
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(html, 'text/html');
+
+              // update title
+              if (doc.title) document.title = doc.title;
+
+              // copy meta/link/style dari head yang belum ada (jangan tambahkan cdn.tailwindcss.com lagi)
+              const existingHead = document.head;
+              doc.head && Array.from(doc.head.children).forEach(el => {
+                // skip script tags for now (we'll handle scripts separately)
+                if (el.tagName === 'SCRIPT') return;
+
+                // For LINK tags: only add if same href not already present
+                if (el.tagName === 'LINK') {
+                  const href = el.getAttribute('href') || '';
+                  if (!href) return;
+                  // skip tailwind CDN link/script if exists in fetched doc
+                  if (href.includes('cdn.tailwindcss.com')) return;
+                  if (!existingHead.querySelector(`link[href="${href}"]`)) {
+                    existingHead.appendChild(el.cloneNode(true));
+                  }
+                  return;
+                }
+
+                // For STYLE or META or other head elements, try to avoid duplicates
+                if (el.tagName === 'STYLE' || el.tagName === 'META' || el.tagName === 'TITLE') {
+                  // naive append: most pages won't duplicate harmful items
+                  existingHead.appendChild(el.cloneNode(true));
+                }
               });
-          }
+
+              // replace body content
+              document.body.innerHTML = doc.body.innerHTML;
+
+              // execute scripts found in the fetched document (body & head if any)
+              const runScripts = (container) => {
+                Array.from(container.querySelectorAll('script')).forEach(s => {
+                  // skip tailwind CDN if present as script tag
+                  if (s.src && s.src.includes('cdn.tailwindcss.com')) return;
+
+                  // If external src, append a regular script (will execute globally)
+                  if (s.src) {
+                    const newS = document.createElement('script');
+                    newS.src = s.src;
+                    // keep same async attribute behavior if present
+                    if (s.hasAttribute('async')) newS.async = true;
+                    document.body.appendChild(newS);
+                  } else {
+                    // inline script: execute as module to avoid polluting global scope
+                    const inline = document.createElement('script');
+                    inline.type = 'module';
+                    // We place original content directly. Using module scope prevents top-level
+                    // const/let/function conflicts with existing globals (fixes "already been declared").
+                    inline.textContent = s.textContent || '';
+                    document.body.appendChild(inline);
+                  }
+                });
+              };
+
+              // run scripts in head/body of fetched doc
+              if (doc.head) runScripts(doc.head);
+              if (doc.body) runScripts(doc.body);
+            })
+            .catch(err => {
+              console.warn('Fallback: tidak bisa load player page, menampilkan beranda. Error:', err);
+            });
         } catch (e) {
           console.error(e);
         }
