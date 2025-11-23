@@ -75,11 +75,18 @@
     </main>
 
     <div id="player-overlay" class="hidden fixed inset-0 z-[100] bg-black flex items-center justify-center backdrop-blur-xl">
-        <div class="w-full h-full max-w-screen-lg max-h-screen aspect-[9/16] sm:aspect-video bg-black relative shadow-2xl">
-            <video id="vid-player" controls autoplay playsinline class="w-full h-full object-contain"></video>
+        <div class="w-full h-full max-w-screen-lg max-h-screen aspect-[9/16] sm:aspect-video bg-black relative shadow-2xl flex flex-col">
+            <video id="vid-player" controls playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
+            
             <button onclick="closePlayer()" class="absolute top-4 right-4 bg-white/10 hover:bg-red-600 text-white p-2 rounded-full transition backdrop-blur">
                 <i class="fas fa-times text-lg"></i>
             </button>
+
+            <div class="absolute bottom-10 left-0 w-full text-center pointer-events-none">
+                <a id="fallback-link" href="#" target="_blank" class="pointer-events-auto bg-black/50 text-white text-xs px-3 py-1 rounded-full hover:bg-red-600 transition hidden">
+                    Video error? Klik di sini
+                </a>
+            </div>
         </div>
     </div>
 
@@ -91,8 +98,6 @@
         window.onload = () => {
             const params = new URLSearchParams(window.location.search);
             if (params.get('drama')) {
-                // Load detail directly if shared link
-                // (Butuh fetch list dulu untuk data lengkap, atau buat endpoint detail khusus)
                 loadHomeData().then(() => {
                    const b = findBook(params.get('drama'));
                    if(b) openDetail(b, false);
@@ -114,7 +119,7 @@
                 const json = await res.json();
                 homeData = json.sections || [];
                 renderList(homeData);
-            } catch(e) { alert("Gagal memuat data"); }
+            } catch(e) { alert("Gagal memuat data: " + e.message); }
             showLoading(false);
         }
 
@@ -132,7 +137,6 @@
             } catch(e) { console.error(e); }
             showLoading(false);
             
-            // Reset view to home
             document.getElementById('view-home').classList.remove('hidden');
             document.getElementById('view-detail').classList.add('hidden');
         }
@@ -151,7 +155,7 @@
                             <div onclick="selectBook('${encodeURIComponent(JSON.stringify(b))}')" 
                                  class="group cursor-pointer relative">
                                 <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition">
-                                    <img src="${b.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy">
+                                    <img src="${b.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" onerror="this.src='https://placehold.co/200x300?text=No+Image'">
                                     <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[10px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes} Eps</div>
                                     <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                                         <i class="fas fa-play-circle text-4xl text-red-600 drop-shadow-lg transform scale-50 group-hover:scale-100 transition"></i>
@@ -186,7 +190,6 @@
             const tags = document.getElementById('d-tags');
             if(book.tags) tags.innerHTML = book.tags.map(t => `<span class="bg-white/10 text-xs px-2 py-1 rounded text-gray-300 border border-white/5">${t}</span>`).join('');
 
-            // Load Episodes
             const grid = document.getElementById('d-chapters');
             grid.innerHTML = '<div class="col-span-full py-12 text-center text-gray-500 animate-pulse">Sedang memuat video...</div>';
 
@@ -203,23 +206,42 @@
                             const btn = document.createElement('button');
                             btn.className = "bg-zinc-800 hover:bg-red-600 text-gray-300 hover:text-white py-2.5 rounded font-bold text-sm transition border border-white/5 hover:border-red-500";
                             btn.innerText = ch.index;
-                            btn.onclick = () => playVideo(ch.url);
+                            btn.onclick = () => playVideo(ch.url, ch.title);
                             grid.appendChild(btn);
                         });
                     }
+                })
+                .catch(e => {
+                    grid.innerHTML = `<div class="col-span-full text-center text-red-500">Gagal memuat: ${e.message}</div>`;
                 });
         }
 
-        function playVideo(url) {
+        function playVideo(url, title) {
             const v = document.getElementById('vid-player');
+            const overlay = document.getElementById('player-overlay');
+            const fallback = document.getElementById('fallback-link');
+            
+            // Set Link Fallback
+            fallback.href = url;
+            fallback.classList.remove('hidden');
+
             v.src = url;
-            document.getElementById('player-overlay').classList.remove('hidden');
-            v.play();
+            overlay.classList.remove('hidden');
+
+            // Tangani Promise Play agar tidak error di console
+            const playPromise = v.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.log("Autoplay prevented/interrupted:", error);
+                    // Jangan panik, user bisa klik play manual
+                });
+            }
         }
 
         window.closePlayer = () => {
             const v = document.getElementById('vid-player');
-            v.pause(); v.src = '';
+            v.pause();
+            v.src = ''; // Reset src agar berhenti buffering
             document.getElementById('player-overlay').classList.add('hidden');
         }
 
