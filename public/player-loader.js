@@ -33,9 +33,8 @@
           return;
         }
         // STYLE, META, TITLE etc.
-        if (!document.head.contains(el)) {
-          document.head.appendChild(el.cloneNode(true));
-        }
+        // clone naively; most projects don't have colliding meta tags that matter here
+        document.head.appendChild(el.cloneNode(true));
       });
 
       // replace body content
@@ -43,7 +42,6 @@
 
       // re-attach preserved header/footer so sticky UI tetap ada
       if (header && !document.querySelector('.glass-nav')) {
-        // insert header at top of body
         document.body.insertBefore(header, document.body.firstChild);
       }
       if (footer && !document.querySelector('.glass-bottom')) {
@@ -73,8 +71,6 @@
       if (doc.body) runScripts(doc.body);
 
       // Setelah player terpasang: coba render related videos (fallback)
-      // Cari tempat untuk related: jika player menyediakan elemen dengan id 'related-videos' gunakan itu,
-      // jika tidak buat dan sisipkan setelah deskripsi.
       renderRelatedFallback();
 
     } catch (err) {
