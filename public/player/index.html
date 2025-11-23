@@ -1,40 +1,57 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Player</title>
-    <meta name="theme-color" content="#000000">
-    <meta name="description" content="">
-    <meta property="og:type" content="video.other">
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="" />
+    <meta property="og:type" content="video.other" />
+    <!-- Tailwind CDN (dev); consider building for production) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- HLS.js for HLS playback & audio/subtitle switching on HLS -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
     <style>
-        body { background-color: #000; color: #e5e5e5; font-family: sans-serif; }
+        body { background-color: #000; color: #e5e5e5; font-family: system-ui, sans-serif; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         .aspect-vertical { aspect-ratio: 9/16; max-height: 85vh; }
         .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .pill-select { background: rgba(30,30,30,0.6); border: 1px solid rgba(255,255,255,0.04); color: #e5e5e5; padding: 6px 8px; border-radius: 8px; font-size: 12px; }
+        .not-available { background: rgba(255,0,0,0.06); border-radius: 8px; padding: 8px; color: #ff8080; text-align:center;}
     </style>
 </head>
 <body class="flex flex-col min-h-screen">
 
-    <nav class="fixed top-0 w-full bg-black/60 backdrop-blur z-50 h-14 flex items-center px-4 justify-between">
+    <nav class="fixed top-0 w-full bg-black/60 backdrop-blur z-50 h-14 flex items-center px-4 justify-between glass-nav">
         <a href="/" class="text-white flex items-center gap-2 hover:text-red-500 transition">
-            <i class="fas fa-chevron-left"></i> <span class="font-bold text-sm">Kembali</span>
+            <i class="fas fa-chevron-left"></i>
+            <span class="font-bold text-sm">Kembali</span>
         </a>
-        <select id="quality-select" class="bg-zinc-800/80 text-xs text-white border border-zinc-600 rounded px-2 py-1 outline-none hidden"></select>
+
+        <div class="flex items-center gap-2">
+            <select id="quality-select" class="pill-select hidden" aria-label="Pilih kualitas"></select>
+            <select id="audio-select" class="pill-select hidden" aria-label="Pilih audio"></select>
+            <select id="subtitle-select" class="pill-select hidden" aria-label="Pilih subtitle"></select>
+        </div>
     </nav>
 
     <main class="flex-1 flex flex-col items-center pt-14 pb-10 w-full">
         <div class="w-full max-w-2xl px-0 sm:px-4">
-            
+
             <div class="w-full bg-black relative group aspect-vertical rounded-xl overflow-hidden ring-1 ring-zinc-800 shadow-2xl mx-auto">
                 <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer" preload="auto"></video>
+
                 <div id="loader" class="absolute inset-0 flex items-center justify-center bg-black z-10">
                     <div class="text-center">
                         <i class="fas fa-circle-notch fa-spin text-red-600 text-4xl mb-2"></i>
-                        <p class="text-xs text-gray-500">Memuat...</p>
+                        <p id="loader-text" class="text-xs text-gray-500">Memuat...</p>
                     </div>
+                </div>
+
+                <div id="unavailable-overlay" class="absolute inset-0 z-20 hidden items-center justify-center pointer-events-none">
+                    <div class="not-available">Video belum tersedia untuk episode ini.</div>
                 </div>
             </div>
 
@@ -65,232 +82,398 @@
                     <h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Daftar Episode</h3>
                     <div id="ep-grid" class="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto hide-scroll pr-1"></div>
                 </div>
+
+                <div id="related-container" class="mt-6"></div>
             </div>
         </div>
     </main>
 
     <script>
-        const API = "/api/data";
+    // ===========================
+    // Player client-side script
+    // ===========================
+    // NOTE: loader may inject this script inside an IIFE; functions below are
+    // defined in top-level scope here so loader can expose needed functions to window.
 
-        // --- 1. LOGIKA PARSING URL (SEO FRIENDLY) ---
-        // Format URL: /player/BOOKID-EPISODE (Contoh: /player/105-12)
-        
-        // Ambil segmen terakhir dari URL (misal: "105-12")
-        const pathSegments = window.location.pathname.replace(/\/+$/, '').split('/');
-        const slug = pathSegments[pathSegments.length - 1];
+    const API = "/api/data";
 
-        // Pisahkan Book ID dan Episode berdasarkan strip terakhir (-)
-        // Kita pakai lastIndexOf agar aman jika Book ID mengandung strip (misal: harry-potter-1)
-        const separatorIndex = slug.lastIndexOf('-');
-        
-        let bookId = null;
-        let urlEpIndex = 1;
+    // Helpers for localStorage
+    const getLS = (k) => JSON.parse(localStorage.getItem(k) || '{}');
+    const setLS = (k,v) => localStorage.setItem(k, JSON.stringify(v));
 
-        if (separatorIndex !== -1) {
-            bookId = slug.substring(0, separatorIndex); // Ambil string sebelum strip terakhir
-            urlEpIndex = parseInt(slug.substring(separatorIndex + 1)) || 1; // Ambil angka setelah strip
-        } else {
-            // Fallback jika format salah (misal user cuma ketik /player/123)
-            bookId = slug;
-        }
+    // Parse slug /player/BOOKID-EP
+    const pathSegments = window.location.pathname.replace(/\/+$/, '').split('/');
+    const slug = pathSegments[pathSegments.length - 1] || '';
+    const separatorIndex = slug.lastIndexOf('-');
+    let bookId = null;
+    let urlEpIndex = 1;
+    if (separatorIndex !== -1) {
+        bookId = slug.substring(0, separatorIndex);
+        urlEpIndex = parseInt(slug.substring(separatorIndex + 1)) || 1;
+    } else {
+        bookId = slug;
+    }
 
-        // --- HELPER ---
-        const getLS = (k) => JSON.parse(localStorage.getItem(k) || '{}');
-        const setLS = (k, v) => localStorage.setItem(k, JSON.stringify(v));
-        let currentInfo = null;
+    // State
+    let currentInfo = null;
+    let chapters = [];
+    let currentChap = null;
+    let hlsInstance = null;
 
-        // --- SEO META UPDATER ---
-        function updateMeta(info) {
-            try {
-                const pageTitle = info && info.title ? `${info.title} - DramaChin` : 'DramaChin';
-                document.title = pageTitle;
+    // Update page title / meta tags for SEO & social preview (client-side)
+    function updateMeta(info) {
+        try {
+            const pageTitle = info && info.title ? `${info.title} - DramaChin` : 'DramaChin';
+            document.title = pageTitle;
 
-                const desc = info && (info.desc || info.description) ? (info.desc || info.description) : '';
-
-                // meta description
-                let metaDesc = document.querySelector('meta[name="description"]');
-                if (!metaDesc) {
-                    metaDesc = document.createElement('meta');
-                    metaDesc.setAttribute('name', 'description');
-                    document.head.appendChild(metaDesc);
-                }
-                metaDesc.setAttribute('content', desc);
-
-                // og:title
-                let ogTitle = document.querySelector('meta[property="og:title"]');
-                if (!ogTitle) {
-                    ogTitle = document.createElement('meta');
-                    ogTitle.setAttribute('property', 'og:title');
-                    document.head.appendChild(ogTitle);
-                }
-                ogTitle.setAttribute('content', info && info.title ? info.title : pageTitle);
-
-                // og:description
-                let ogDesc = document.querySelector('meta[property="og:description"]');
-                if (!ogDesc) {
-                    ogDesc = document.createElement('meta');
-                    ogDesc.setAttribute('property', 'og:description');
-                    document.head.appendChild(ogDesc);
-                }
-                ogDesc.setAttribute('content', desc);
-
-                // og:image
-                if (info && info.cover) {
-                    let ogImage = document.querySelector('meta[property="og:image"]');
-                    if (!ogImage) {
-                        ogImage = document.createElement('meta');
-                        ogImage.setAttribute('property', 'og:image');
-                        document.head.appendChild(ogImage);
-                    }
-                    ogImage.setAttribute('content', info.cover);
-                }
-            } catch (e) {
-                console.warn('updateMeta error', e);
+            const desc = info && (info.desc || info.description) ? (info.desc || info.description) : '';
+            let metaDesc = document.querySelector('meta[name="description"]');
+            if (!metaDesc) {
+                metaDesc = document.createElement('meta');
+                metaDesc.setAttribute('name','description');
+                document.head.appendChild(metaDesc);
             }
-        }
+            metaDesc.setAttribute('content', desc);
 
-        // --- INIT ---
-        async function init() {
-            if (!bookId) return; // Stop jika ID kosong
+            let ogTitle = document.querySelector('meta[property="og:title"]');
+            if (!ogTitle) { ogTitle = document.createElement('meta'); ogTitle.setAttribute('property','og:title'); document.head.appendChild(ogTitle); }
+            ogTitle.setAttribute('content', info && info.title ? info.title : pageTitle);
 
-            try {
-                // Fetch Data API
-                const res = await fetch(`${API}?type=chapter&bookId=${bookId}`);
-                const json = await res.json();
-                if (json.error) throw new Error(json.error);
-                
-                const chapters = json.chapters || [];
-                if (chapters.length === 0) throw new Error("Belum ada episode.");
-                
-                currentInfo = json.info || {};
+            let ogDesc = document.querySelector('meta[property="og:description"]');
+            if (!ogDesc) { ogDesc = document.createElement('meta'); ogDesc.setAttribute('property','og:description'); document.head.appendChild(ogDesc); }
+            ogDesc.setAttribute('content', desc);
 
-                // Update meta/title based on fetched info
-                updateMeta(currentInfo);
-
-                // Cari Object Chapter yang sesuai dengan Episode di URL
-                let currentChap = chapters.find(c => c.index === urlEpIndex);
-
-                // Jika episode di URL tidak ditemukan (misal user asal ketik angka), fallback ke Ep 1
-                if (!currentChap) {
-                    console.warn("Episode tidak ditemukan, memuat episode pertama.");
-                    currentChap = chapters[0];
-                    // Update URL di browser tanpa reload agar user tahu
-                    history.replaceState(null, '', `/player/${bookId}-${currentChap.index}`);
-                }
-
-                // Simpan History
-                saveHistory(currentChap);
-
-                // Render UI
-                renderUI(currentInfo, currentChap, chapters);
-
-            } catch (e) {
-                document.getElementById('loader').innerHTML = `<div class="text-red-500 text-center px-4">${e.message}</div>`;
+            if (info && info.cover) {
+                let ogImage = document.querySelector('meta[property="og:image"]');
+                if (!ogImage) { ogImage = document.createElement('meta'); ogImage.setAttribute('property','og:image'); document.head.appendChild(ogImage);}
+                ogImage.setAttribute('content', info.cover);
             }
-        }
+        } catch(e) { console.warn('updateMeta error', e); }
+    }
 
-        function saveHistory(chap) {
+    // Initialize player page
+    async function init() {
+        if (!bookId) return;
+        try {
+            const res = await fetch(`${API}?type=chapter&bookId=${encodeURIComponent(bookId)}`);
+            const json = await res.json();
+            if (json.error) throw new Error(json.error);
+            currentInfo = json.info || {};
+            chapters = json.chapters || [];
+            // update meta/title
+            updateMeta(currentInfo);
+
+            if (chapters.length === 0) throw new Error("Belum ada episode.");
+
+            // find chap by index
+            currentChap = chapters.find(c => c.index === urlEpIndex) || chapters[0];
+            if (!chapters.find(c => c.index === urlEpIndex)) {
+                history.replaceState(null, '', `/player/${bookId}-${currentChap.index}`);
+            }
+
+            saveHistory(currentChap);
+            renderUI(currentInfo, currentChap, chapters);
+            // try render related if backend didn't provide
+            if (!json.related || json.related.length === 0) renderRelatedFallback();
+        } catch (e) {
+            document.getElementById('loader-text').innerText = e.message || 'Gagal memuat.';
+            document.getElementById('loader').classList.remove('hidden');
+        }
+    }
+
+    function saveHistory(chap) {
+        try {
             const hist = getLS('db_history');
-            hist[bookId] = { 
-                id: bookId, 
-                title: currentInfo.title, 
-                cover: currentInfo.cover, 
-                episodes: currentInfo.totalEps, 
-                lastEpisode: chap.index, 
-                timestamp: Date.now() 
+            hist[bookId] = {
+                id: bookId,
+                title: currentInfo.title,
+                cover: currentInfo.cover,
+                episodes: currentInfo.totalEps,
+                lastEpisode: chap.index,
+                timestamp: Date.now()
             };
             setLS('db_history', hist);
+        } catch(e){}
+    }
+
+    // Render UI given info, currentChap and full chapters list
+    function renderUI(info, cur, chs) {
+        const vid = document.getElementById('video-el');
+        const qSelect = document.getElementById('quality-select');
+        const aSelect = document.getElementById('audio-select');
+        const sSelect = document.getElementById('subtitle-select');
+        const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loader-text');
+        const unavailableOverlay = document.getElementById('unavailable-overlay');
+
+        // Update meta/title again
+        updateMeta(info);
+
+        // Update basic info
+        document.getElementById('title').innerText = info.title || '-';
+        document.getElementById('desc').innerText = info.desc || '';
+        document.getElementById('ep-idx').innerText = cur.index;
+
+        // Episode grid
+        const epGrid = document.getElementById('ep-grid');
+        epGrid.innerHTML = chs.map(ch => {
+            const isActive = ch.index === cur.index;
+            return `<a href="/player/${bookId}-${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${isActive ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>`;
+        }).join('');
+
+        // Prev / Next
+        const arrayIndex = chs.findIndex(c => c.index === cur.index);
+        const prevChap = chs[arrayIndex - 1];
+        const nextChap = chs[arrayIndex + 1];
+        const prevBtn = document.getElementById('btn-prev');
+        const nextBtn = document.getElementById('btn-next');
+
+        if (prevChap) {
+            prevBtn.href = `/player/${bookId}-${prevChap.index}`;
+            prevBtn.classList.remove('opacity-50','pointer-events-none');
+        } else {
+            prevBtn.removeAttribute('href');
+            prevBtn.classList.add('opacity-50','pointer-events-none');
         }
 
-        function renderUI(info, currentChap, chapters) {
-            const vid = document.getElementById('video-el');
-            const qSelect = document.getElementById('quality-select');
+        if (nextChap) {
+            nextBtn.href = `/player/${bookId}-${nextChap.index}`;
+            nextBtn.classList.remove('opacity-50','pointer-events-none','bg-zinc-800');
+            nextBtn.classList.add('bg-red-600');
+            nextBtn.innerHTML = `Lanjut <i class="fas fa-step-forward"></i>`;
+        } else {
+            nextBtn.removeAttribute('href');
+            nextBtn.classList.add('opacity-50','pointer-events-none','bg-zinc-800');
+            nextBtn.classList.remove('bg-red-600');
+            nextBtn.innerHTML = `Tamat <i class="fas fa-check"></i>`;
+        }
 
-            // update meta again in case info changed or arrived later
-            updateMeta(info);
+        // Clear previous HLS instance if any
+        if (hlsInstance) {
+            try { hlsInstance.destroy(); } catch(e) {}
+            hlsInstance = null;
+        }
 
-            // --- NAVIGASI BERDASARKAN ARRAY INDEX (Lebih Stabil) ---
-            const arrayIndex = chapters.findIndex(c => c.index === currentChap.index);
-            const prevChap = chapters[arrayIndex - 1];
-            const nextChap = chapters[arrayIndex + 1];
+        // Reset UI controls
+        qSelect.classList.add('hidden'); aSelect.classList.add('hidden'); sSelect.classList.add('hidden');
+        qSelect.innerHTML = ''; aSelect.innerHTML = ''; sSelect.innerHTML = '';
+        unavailableOverlay.classList.add('hidden');
 
-            // Video Source Logic
-            if (currentChap.sources && currentChap.sources.length) {
-                qSelect.classList.remove('hidden');
-                qSelect.innerHTML = currentChap.sources.map(s => `<option value="${s.url}">${s.q}p</option>`).join('');
-                vid.src = currentChap.sources[0].url;
-                
-                qSelect.onchange = (e) => {
-                    const t = vid.currentTime; const p = !vid.paused;
-                    vid.src = e.target.value; vid.currentTime = t;
-                    if(p) vid.play();
-                }
-            } else {
-                qSelect.classList.add('hidden');
-                vid.src = currentChap.url;
-            }
-            
-            vid.poster = info.cover;
-            vid.oncanplay = () => document.getElementById('loader').classList.add('hidden');
-            
-            // Auto Next
-            vid.onended = () => {
-                if(nextChap) window.location.href = `/player/${bookId}-${nextChap.index}`;
-            };
+        // Determine if current chapter has sources
+        const sources = Array.isArray(cur.sources) ? cur.sources.filter(s => s && s.url) : [];
 
-            // Info Text
-            document.getElementById('title').innerText = info.title;
-            document.getElementById('desc').innerText = info.desc;
-            document.getElementById('ep-idx').innerText = currentChap.index;
-
-            // Nav Buttons Update
-            const prevBtn = document.getElementById('btn-prev');
-            const nextBtn = document.getElementById('btn-next');
-
-            if (prevChap) {
-                prevBtn.href = `/player/${bookId}-${prevChap.index}`;
-                prevBtn.classList.remove('opacity-50', 'pointer-events-none');
-            } else {
-                prevBtn.removeAttribute('href');
-                prevBtn.classList.add('opacity-50', 'pointer-events-none');
-            }
-
-            if (nextChap) {
-                nextBtn.href = `/player/${bookId}-${nextChap.index}`;
-                nextBtn.classList.remove('opacity-50', 'pointer-events-none', 'bg-zinc-800');
-                nextBtn.classList.add('bg-red-600');
-                nextBtn.innerHTML = `Lanjut <i class="fas fa-step-forward"></i>`;
-            } else {
-                nextBtn.removeAttribute('href');
-                nextBtn.classList.add('opacity-50', 'pointer-events-none', 'bg-zinc-800');
-                nextBtn.classList.remove('bg-red-600');
-                nextBtn.innerHTML = `Tamat <i class="fas fa-check"></i>`;
-            }
-
-            // Grid Episode
-            document.getElementById('ep-grid').innerHTML = chapters.map(ch => {
-                const isActive = ch.index === currentChap.index;
-                return `<a href="/player/${bookId}-${ch.index}" class="block text-center py-2 rounded text-xs font-bold border ${isActive ? 'bg-red-600 border-red-600 text-white' : 'bg-zinc-800 border-zinc-700 text-gray-400'}">${ch.index}</a>`
-            }).join('');
-            
+        if (!sources || sources.length === 0) {
+            // No playable source
+            loaderText.innerText = 'Video belum tersedia untuk episode ini.';
+            loader.classList.remove('hidden');
+            unavailableOverlay.classList.remove('hidden');
+            // remove video src safely
+            try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch(e){}
             updateFavBtn();
+            return;
         }
 
-        function toggleFav() {
+        // Have sources: show loader while loading
+        loaderText.innerText = 'Memuat...';
+        loader.classList.remove('hidden');
+
+        // Populate quality select (unique by q)
+        const uniqueQualities = [];
+        sources.forEach(s => {
+            const q = s.q || 0;
+            if (!uniqueQualities.find(u => u.q === q && u.url === s.url)) uniqueQualities.push({ q, url: s.url, lang: s.lang || null, type: s.type || null });
+        });
+        if (uniqueQualities.length > 0) {
+            qSelect.classList.remove('hidden');
+            qSelect.innerHTML = uniqueQualities.map(u => `<option value="${encodeURIComponent(u.url)}">${u.q ? u.q+'p' : 'Auto' }${u.lang ? ' • '+u.lang.toUpperCase() : ''}</option>`).join('');
+        }
+
+        // Populate audio select if audioTracks or sources with lang variants exist
+        const audioTracks = Array.isArray(cur.audioTracks) ? cur.audioTracks : [];
+        // Some providers include language per source; use that too as audio options
+        const audioFromSources = uniqueQualities.filter(u => u.lang).map(u => ({ lang: u.lang, url: u.url }));
+        const audioCandidates = [...audioTracks, ...audioFromSources];
+        if (audioCandidates && audioCandidates.length) {
+            aSelect.classList.remove('hidden');
+            // dedupe by url
+            const seen = new Set();
+            aSelect.innerHTML = audioCandidates.map(a => {
+                const label = (a.lang || 'und').toUpperCase();
+                const value = a.url;
+                if (seen.has(value)) return '';
+                seen.add(value);
+                return `<option value="${encodeURIComponent(value)}">${label}</option>`;
+            }).join('');
+        }
+
+        // Populate subtitle select
+        const subtitles = Array.isArray(cur.subtitles) ? cur.subtitles : [];
+        if (subtitles && subtitles.length) {
+            sSelect.classList.remove('hidden');
+            sSelect.innerHTML = `<option value="">Off</option>` + subtitles.map(sub => {
+                const label = (sub.lang || 'und').toUpperCase();
+                return `<option value="${encodeURIComponent(sub.url)}">${label}</option>`;
+            }).join('');
+            // set default first subtitle
+            if (subtitles[0] && subtitles[0].url) {
+                setSubtitle(subtitles[0].url);
+                sSelect.value = encodeURIComponent(subtitles[0].url);
+            }
+        }
+
+        // Helper to actually load a source URL into video element (supports HLS via hls.js)
+        async function loadSource(url) {
+            try {
+                // decode if encoded
+                url = decodeURIComponent(url);
+            } catch(e){}
+            // remove existing tracks
+            Array.from(vid.querySelectorAll('track')).forEach(t => t.remove());
+            // destroy previous hls if exists
+            if (hlsInstance) { try { hlsInstance.destroy(); } catch(e){} hlsInstance = null; }
+
+            // If HLS manifest and Hls is supported, use Hls.js
+            const isHls = url.endsWith('.m3u8') || url.includes('.m3u8');
+            if (isHls && window.Hls && Hls.isSupported()) {
+                hlsInstance = new Hls({ enableWorker: true, debug: false });
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(vid);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                    // auto play and hide loader
+                    loader.classList.add('hidden');
+                    try { vid.play(); } catch(e) {}
+                });
+                // expose tracks if available (audio/subtitle) via hlsInstance
+            } else {
+                // Normal mp4 or other container
+                vid.src = url;
+                // wait for canplay or error
+                vid.oncanplay = () => { loader.classList.add('hidden'); };
+                vid.onerror = () => {
+                    loaderText.innerText = 'Gagal memuat video.';
+                    loader.classList.remove('hidden');
+                };
+                try { vid.load(); vid.play().catch(()=>{}); } catch(e){}
+            }
+        }
+
+        // initially load highest quality (first in uniqueQualities)
+        if (uniqueQualities.length) {
+            const initialUrl = uniqueQualities[0].url;
+            loadSource(initialUrl);
+            // set quality select change handler
+            qSelect.onchange = (e) => {
+                const url = e.target.value;
+                loader.classList.remove('hidden');
+                loadSource(url);
+            };
+        } else {
+            // fallback: try first source object without quality
+            const first = sources[0];
+            loadSource(first.url);
+        }
+
+        // audio select change -> replace src (best-effort)
+        aSelect.onchange = (e) => {
+            const url = decodeURIComponent(e.target.value);
+            // If audio url points to a whole-video resource, load it
+            loader.classList.remove('hidden');
+            loadSource(url);
+        };
+
+        // subtitle select change -> set track
+        sSelect.onchange = (e) => {
+            const val = e.target.value;
+            if (!val) {
+                // remove tracks
+                Array.from(vid.querySelectorAll('track')).forEach(t => t.remove());
+                Array.from(vid.textTracks || []).forEach(tt => { tt.mode = 'disabled'; });
+                return;
+            }
+            setSubtitle(decodeURIComponent(val));
+        };
+
+        // set onclick handlers for prev/next to keep SPA behaviour consistent (link already set)
+        // enable favourite button state
+        updateFavBtn();
+    } // renderUI end
+
+    // Add subtitle <track> element and show it
+    function setSubtitle(url) {
+        try {
+            const vid = document.getElementById('video-el');
+            // remove existing tracks
+            Array.from(vid.querySelectorAll('track')).forEach(t => t.remove());
+            if (!url) return;
+            const track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = 'Subtitle';
+            track.srclang = 'id';
+            track.src = url;
+            track.default = true;
+            vid.appendChild(track);
+            // give browser time to load the track
+            setTimeout(() => {
+                Array.from(vid.textTracks || []).forEach(tt => { tt.mode = 'showing'; });
+            }, 300);
+        } catch(e) { console.warn('setSubtitle error', e); }
+    }
+
+    // Favorite functions (exposed to global by loader)
+    function toggleFav() {
+        try {
             const favs = getLS('db_favs');
             if (favs[bookId]) delete favs[bookId];
             else favs[bookId] = { id: bookId, title: currentInfo.title, cover: currentInfo.cover, episodes: currentInfo.totalEps };
             setLS('db_favs', favs);
             updateFavBtn();
-        }
+        } catch(e){}
+    }
 
-        function updateFavBtn() {
+    function updateFavBtn() {
+        try {
             const favs = getLS('db_favs');
             const btn = document.getElementById('fav-btn');
+            if (!btn) return;
             btn.innerHTML = favs[bookId] ? '<i class="fas fa-heart text-red-600"></i>' : '<i class="far fa-heart"></i>';
-        }
+        } catch(e){}
+    }
 
-        init();
+    // Related fallback renderer (simple)
+    async function renderRelatedFallback() {
+        try {
+            const container = document.getElementById('related-container');
+            if (!container) return;
+            container.innerHTML = `<h3 class="text-xs uppercase text-gray-500 font-bold mb-3">Related</h3><div id="related-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-3"></div>`;
+            const grid = document.getElementById('related-grid');
+            const res = await fetch(`${API}?type=list`);
+            if (!res.ok) return;
+            const json = await res.json();
+            const sections = json.sections || [];
+            let books = sections.flatMap(s => s.books || []);
+            books = books.filter(b => b && String(b.id) !== String(bookId)).slice(0,12);
+            grid.innerHTML = books.map(b => {
+                const targetEp = b.lastEpisode || 1;
+                const url = `/player/${b.id}-${targetEp}`;
+                return `
+                <a href="${url}" class="block group relative transition transform active:scale-95">
+                  <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 relative border border-white/5 group-hover:border-red-600 transition">
+                    <img src="${b.cover}" class="w-full h-full object-cover" loading="lazy" onerror="this.src='https://via.placeholder.com/200x300'">
+                    <div class="absolute top-1 right-1 bg-black/80 text-[9px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes||'?'} Eps</div>
+                  </div>
+                  <h3 class="text-xs font-medium text-gray-300 line-clamp-2 group-hover:text-white leading-tight">${(b.title||'Untitled')}</h3>
+                </a>`;
+            }).join('');
+        } catch (e) { console.warn('renderRelatedFallback error', e); }
+    }
+
+    // Kick off
+    init();
+
+    // Expose some functions globally so the loader wrapper can attach them to window
+    // (loader expects to find toggleFav, updateFavBtn, saveHistory names after script runs)
+    try { if (typeof window !== 'undefined') { window.toggleFav = toggleFav; window.updateFavBtn = updateFavBtn; window.saveHistory = saveHistory; } } catch(e){}
+
     </script>
 </body>
 </html>
