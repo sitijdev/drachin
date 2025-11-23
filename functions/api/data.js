@@ -113,34 +113,53 @@ export async function onRequest(context) {
       const videoMap = {};
       if (unlockData?.data?.chapterVoList) {
           unlockData.data.chapterVoList.forEach(ch => {
+              // Tentukan kandidat key yang mungkin dipakai (ch.chapterId, ch.id, ch.chapter_id)
+              const keys = [];
+              if (ch.chapterId !== undefined) keys.push(ch.chapterId);
+              if (ch.chapter_id !== undefined) keys.push(ch.chapter_id);
+              if (ch.id !== undefined) keys.push(ch.id);
+
               const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-              // Simpan array kualitas, jangan cuma satu
               if (cdn && cdn.videoPathList) {
-                  videoMap[ch.chapterId] = cdn.videoPathList.map(v => ({
+                  const sourcesArr = cdn.videoPathList.map(v => ({
                       q: v.quality,
                       url: v.videoPath
-                  })).sort((a, b) => b.q - a.q); // Urutkan dari tertinggi (720p) ke terendah
+                  })).sort((a, b) => b.q - a.q); // Urut dari kualitas tertinggi
+
+                  // Simpan sources untuk semua kandidat key (sebagai string) agar lookup konsisten
+                  keys.forEach(k => {
+                      if (k !== undefined && k !== null) videoMap[String(k)] = sourcesArr;
+                  });
               }
           });
       }
 
+      // 4. Susun finalChapters: masukkan SEMUA chapter (jangan skip yang tak ada sources)
       const finalChapters = [];
       liveChapterList.forEach(ch => {
-          const sources = videoMap[ch.id];
-          // Fallback jika tidak ada di map, cek mp4 Webfic
-          if (!sources && ch.mp4) {
-               finalChapters.push({
-                  index: ch.index,
-                  title: ch.name || `Episode ${ch.index}`,
-                  sources: [{ q: 480, url: ch.mp4 }] // Asumsi webfic mp4
-               });
-          } else if (sources) {
-              finalChapters.push({
-                  index: ch.index,
-                  title: ch.name || `Episode ${ch.index}`,
-                  sources: sources
-              });
+          const keyCandidates = [ch.id, ch.chapterId, ch.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
+          let sources = null;
+          for (const k of keyCandidates) {
+              if (!k) continue;
+              if (videoMap[k]) { sources = videoMap[k]; break; }
           }
+
+          const chapterObj = {
+              index: ch.index,
+              title: ch.name || `Episode ${ch.index}`
+          };
+
+          if (sources && sources.length) {
+              chapterObj.sources = sources;
+          } else if (ch.mp4) {
+              // fallback ke mp4 kalau tersedia
+              chapterObj.sources = [{ q: 480, url: ch.mp4 }];
+          } else {
+              // Tidak ada sumber — tapi masukkan sebagai episode dengan array kosong
+              chapterObj.sources = [];
+          }
+
+          finalChapters.push(chapterObj);
       });
 
       if (finalChapters.length === 0) return jsonResponse({ error: "Video tidak tersedia." }, "ERR");
