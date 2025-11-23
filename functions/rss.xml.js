@@ -1,36 +1,52 @@
 export async function onRequest(context) {
-  const { env, request } = context;
+  const { request } = context;
   const url = new URL(request.url);
+  const baseUrl = url.origin;
 
-  // Join tabel untuk dapat judul buku + judul episode
-  const { results } = await env.DB.prepare(`
-    SELECT c.title as ep_title, c.chapter_id, c.created_at, b.book_id 
-    FROM chapters c
-    JOIN books b ON c.book_id = b.book_id
-    ORDER BY c.created_at DESC LIMIT 20
-  `).all();
+  try {
+    // 1. Ambil data dari series.json
+    const seriesRes = await fetch(`${baseUrl}/series.json`);
+    if (!seriesRes.ok) throw new Error("Gagal memuat series.json");
+    
+    const books = await seriesRes.json();
 
-  let rss = `<?xml version="1.0" encoding="UTF-8" ?>
-  <rss version="2.0">
-  <channel>
-    <title>Dramabox Updates</title>
-    <link>${url.origin}</link>
-    <description>Episode terbaru drama pendek</description>
-    <language>id</language>`;
+    let rss = `<?xml version="1.0" encoding="UTF-8" ?>
+    <rss version="2.0">
+    <channel>
+      <title>Dramabox Unofficial Updates</title>
+      <link>${baseUrl}</link>
+      <description>Nonton drama pendek sub Indo gratis</description>
+      <language>id</language>`;
 
-  if (results) {
-      results.forEach(item => {
-        rss += `
-        <item>
-          <title>${item.ep_title}</title>
-          <link>${url.origin}/?drama=${item.book_id}</link>
-          <guid isPermaLink="false">${item.chapter_id}</guid>
-          <pubDate>${new Date(item.created_at).toUTCString()}</pubDate>
-        </item>`;
-      });
+    // Ambil 20 drama teratas dari JSON
+    const latestBooks = books.slice(0, 20);
+
+    if (Array.isArray(latestBooks)) {
+        latestBooks.forEach(item => {
+          const bookId = item.id || item.source_id;
+          // Format URL Baru: /player/ID-1
+          const link = `${baseUrl}/player/${bookId}-1`;
+          const thumb = item.cover_path || item.cover || '';
+          
+          rss += `
+          <item>
+            <title><![CDATA[${item.title}]]></title>
+            <link>${link}</link>
+            <guid isPermaLink="true">${link}</guid>
+            <description><![CDATA[
+              <img src="${thumb}" style="width:100px; object-fit:cover;" /><br/>
+              ${item.description ? item.description.substring(0, 150) + '...' : 'Nonton sekarang...'}
+            ]]></description>
+            <pubDate>${new Date().toUTCString()}</pubDate>
+          </item>`;
+        });
+    }
+
+    rss += `</channel></rss>`;
+
+    return new Response(rss, { headers: { "Content-Type": "application/xml" } });
+
+  } catch (e) {
+    return new Response(`Error generating RSS: ${e.message}`, { status: 500 });
   }
-
-  rss += `</channel></rss>`;
-
-  return new Response(rss, { headers: { "Content-Type": "application/xml" } });
 }
