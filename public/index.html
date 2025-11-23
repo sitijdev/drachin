@@ -8,262 +8,254 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { background-color: #0f0f0f; color: #e5e5e5; }
+        body { background-color: #0f0f0f; color: #e5e5e5; font-family: sans-serif; }
         .hide-scroll::-webkit-scrollbar { display: none; }
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .aspect-poster { aspect-ratio: 2/3; }
-        .glass-nav { background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(12px); }
+        .glass-nav { background: rgba(0, 0, 0, 0.9); border-bottom: 1px solid rgba(255,255,255,0.1); }
     </style>
 </head>
-<body class="antialiased pb-20 font-sans">
+<body class="min-h-screen flex flex-col">
 
-    <nav class="fixed top-0 w-full glass-nav z-50 border-b border-white/5">
-        <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
-            <a href="/" onclick="event.preventDefault(); goHome()" class="flex items-center gap-2 shrink-0">
-                <i class="fas fa-play-circle text-red-600 text-2xl"></i>
-                <span class="font-bold text-lg hidden sm:block tracking-wide">DRAMABOX</span>
+    <nav class="fixed top-0 w-full glass-nav z-50">
+        <div class="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 text-red-600 hover:text-red-500 transition">
+                <i class="fas fa-play-circle text-2xl"></i>
+                <span class="font-bold text-lg tracking-wide">DRAMABOX</span>
             </a>
-            
-            <form onsubmit="handleSearch(event)" class="flex-1 max-w-md relative">
-                <input id="search-input" type="text" placeholder="Cari drama..." 
-                    class="w-full bg-white/10 border border-white/10 rounded-full py-2 px-5 pl-10 text-sm text-white focus:outline-none focus:bg-white/20 transition">
-                <i class="fas fa-search absolute left-3.5 top-2.5 text-gray-400 text-sm"></i>
-            </form>
-
-            <div id="loading" class="hidden text-red-500"><i class="fas fa-circle-notch fa-spin"></i></div>
+            <div id="search-container" class="relative">
+                <input type="text" id="search-input" placeholder="Cari judul..." 
+                    class="bg-white/10 border border-white/10 rounded-full px-4 py-1 text-sm focus:outline-none focus:bg-white/20 transition w-32 sm:w-48 text-white placeholder-gray-500">
+            </div>
         </div>
     </nav>
 
-    <main class="max-w-5xl mx-auto mt-20 min-h-screen px-4">
-        
-        <div id="view-home" class="space-y-8 animate-fade-in"></div>
+    <main id="app" class="flex-1 pt-20 pb-10 px-4 max-w-5xl mx-auto w-full">
+        </main>
 
-        <div id="view-detail" class="hidden">
-            <button onclick="goHome()" class="mb-4 flex items-center gap-2 text-gray-400 hover:text-white transition">
-                <i class="fas fa-arrow-left"></i> Kembali
-            </button>
+    <template id="tpl-home">
+        <div id="home-content" class="space-y-8 animate-fade-in">
+            </div>
+    </template>
 
-            <div class="flex flex-col md:flex-row gap-6 items-start">
-                <div class="w-full md:w-64 shrink-0">
-                    <div class="aspect-poster rounded-xl overflow-hidden shadow-2xl border border-white/10 relative">
-                        <img id="d-cover" src="" class="w-full h-full object-cover">
-                        <div class="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded shadow">HD</div>
-                    </div>
+    <template id="tpl-player">
+        <div class="max-w-4xl mx-auto">
+            <div class="aspect-video bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10 mb-4 relative group">
+                <video id="video-el" controls autoplay playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
+            </div>
+
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b border-white/10 pb-4">
+                <div>
+                    <h1 id="drama-title" class="text-xl font-bold text-white leading-tight">Memuat Judul...</h1>
+                    <p class="text-gray-400 text-sm mt-1">Episode <span id="ep-num">-</span></p>
                 </div>
-                
-                <div class="flex-1 w-full">
-                    <h1 id="d-title" class="text-2xl md:text-4xl font-bold text-white mb-3 leading-tight"></h1>
-                    <div class="flex flex-wrap gap-2 mb-4" id="d-tags"></div>
-                    
-                    <div class="flex items-center gap-6 text-sm text-gray-400 mb-6 border-y border-white/10 py-3">
-                        <span><i class="fas fa-list-ol text-red-500 mr-1"></i> <span id="d-eps">0</span> Episode</span>
-                        <span><i class="fas fa-closed-captioning text-red-500 mr-1"></i> Sub Indo</span>
-                    </div>
-
-                    <p id="d-desc" class="text-gray-300 text-sm leading-relaxed mb-6"></p>
-
-                    <div>
-                        <h3 class="text-white font-bold mb-3 flex items-center gap-2">
-                            <i class="fas fa-play-circle text-red-600"></i> Pilih Episode
-                        </h3>
-                        <div id="d-chapters" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2 max-h-96 overflow-y-auto pr-1 custom-scroll">
-                            </div>
-                    </div>
+                <div class="flex gap-2 w-full md:w-auto">
+                    <a id="btn-prev" href="#" class="flex-1 md:flex-none text-center px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-backward"></i> Prev
+                    </a>
+                    <a id="btn-next" href="#" class="flex-1 md:flex-none text-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        Next <i class="fas fa-forward"></i>
+                    </a>
                 </div>
             </div>
-        </div>
-    </main>
 
-    <div id="player-overlay" class="hidden fixed inset-0 z-[100] bg-black flex items-center justify-center backdrop-blur-xl">
-        <div class="w-full h-full max-w-screen-lg max-h-screen aspect-[9/16] sm:aspect-video bg-black relative shadow-2xl flex flex-col">
-            <video id="vid-player" controls playsinline class="w-full h-full object-contain bg-black" referrerpolicy="no-referrer"></video>
-            
-            <button onclick="closePlayer()" class="absolute top-4 right-4 bg-white/10 hover:bg-red-600 text-white p-2 rounded-full transition backdrop-blur">
-                <i class="fas fa-times text-lg"></i>
-            </button>
-
-            <div class="absolute bottom-10 left-0 w-full text-center pointer-events-none">
-                <a id="fallback-link" href="#" target="_blank" class="pointer-events-auto bg-black/50 text-white text-xs px-3 py-1 rounded-full hover:bg-red-600 transition hidden">
-                    Video error? Klik di sini
-                </a>
+            <div class="bg-zinc-900/50 p-4 rounded-xl border border-white/5">
+                <h3 class="text-white font-bold mb-4 text-sm uppercase tracking-wider text-gray-400">Daftar Episode</h3>
+                <div id="ep-grid" class="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-2 max-h-60 overflow-y-auto pr-2 custom-scroll">
+                    </div>
             </div>
         </div>
-    </div>
+    </template>
 
     <script>
-        const API = "/api/data";
-        let homeData = null;
+        const API_BASE = "/api/data";
+        let homeCache = null;
 
-        // Init
-        window.onload = () => {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('drama')) {
-                loadHomeData().then(() => {
-                   const b = findBook(params.get('drama'));
-                   if(b) openDetail(b, false);
-                });
+        // --- ROUTER ---
+        // Menangani navigasi URL: /player/123/1
+        async function router() {
+            const path = window.location.pathname;
+            
+            // Regex untuk mencocokkan /player/BOOKID/CHAPTER
+            const playerMatch = path.match(/^\/player\/(\d+)\/(\d+)$/);
+
+            if (playerMatch) {
+                const bookId = playerMatch[1];
+                const chapterIndex = parseInt(playerMatch[2]);
+                await renderPlayer(bookId, chapterIndex);
             } else {
-                loadHomeData();
+                // Default ke Home
+                await renderHome();
+            }
+        }
+
+        // Navigasi tanpa reload (SPA Link)
+        window.navigate = (e) => {
+            const link = e.currentTarget;
+            if (link.href) {
+                e.preventDefault();
+                history.pushState({}, "", link.href);
+                router();
             }
         };
 
-        window.onpopstate = (e) => {
-            if(e.state?.view === 'detail') renderDetail(e.state.data);
-            else goHome(false);
-        };
+        window.onpopstate = router;
 
-        async function loadHomeData() {
-            showLoading(true);
-            try {
-                const res = await fetch(`${API}?type=list`);
-                const json = await res.json();
-                homeData = json.sections || [];
-                renderList(homeData);
-            } catch(e) { alert("Gagal memuat data: " + e.message); }
-            showLoading(false);
-        }
+        // --- PAGES ---
 
-        async function handleSearch(e) {
-            e.preventDefault();
-            const query = document.getElementById('search-input').value;
-            if(!query) return;
+        // 1. Render Home
+        async function renderHome() {
+            const app = document.getElementById('app');
+            app.innerHTML = '<div class="text-center py-20 text-gray-500"><i class="fas fa-circle-notch fa-spin text-red-600 text-2xl"></i> Memuat Drama...</div>';
 
-            showLoading(true);
-            try {
-                const res = await fetch(`${API}?type=search&keyword=${encodeURIComponent(query)}`);
-                const json = await res.json();
-                if(json.sections) renderList(json.sections);
-                else alert("Tidak ditemukan");
-            } catch(e) { console.error(e); }
-            showLoading(false);
+            if (!homeCache) {
+                try {
+                    const res = await fetch(`${API_BASE}?type=list`);
+                    const json = await res.json();
+                    homeCache = json.sections || [];
+                } catch (e) {
+                    app.innerHTML = `<div class="text-center text-red-500 p-10">Gagal memuat data: ${e.message}</div>`;
+                    return;
+                }
+            }
+
+            const tpl = document.getElementById('tpl-home').content.cloneNode(true);
+            const container = tpl.getElementById('home-content');
             
-            document.getElementById('view-home').classList.remove('hidden');
-            document.getElementById('view-detail').classList.add('hidden');
+            let html = '';
+            homeCache.forEach(sec => {
+                if (!sec.books.length) return;
+                html += `
+                    <section>
+                        <h2 class="text-lg font-bold text-white mb-4 border-l-4 border-red-600 pl-3">${sec.title}</h2>
+                        <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 sm:gap-4">
+                            ${sec.books.map(b => `
+                                <a href="/player/${b.id}/1" onclick="navigate(event)" class="group relative block cursor-pointer">
+                                    <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition">
+                                        <img src="${b.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" onerror="this.src='https://placehold.co/200x300?text=No+Image'">
+                                        <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[10px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes} Eps</div>
+                                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                                            <i class="fas fa-play-circle text-4xl text-red-600 drop-shadow-lg transform scale-50 group-hover:scale-100 transition"></i>
+                                        </div>
+                                    </div>
+                                    <h3 class="text-xs sm:text-sm font-medium text-gray-300 group-hover:text-white line-clamp-2 leading-tight">${b.title}</h3>
+                                </a>
+                            `).join('')}
+                        </div>
+                    </section>
+                `;
+            });
+            
+            container.innerHTML = html;
+            app.innerHTML = '';
+            app.appendChild(tpl);
+            document.title = "Dramabox Unofficial";
         }
 
-        function renderList(sections) {
-            const container = document.getElementById('view-home');
-            container.innerHTML = '';
+        // 2. Render Player
+        async function renderPlayer(bookId, chapterIndex) {
+            const app = document.getElementById('app');
+            // Skeleton Loading
+            app.innerHTML = '<div class="text-center py-40"><i class="fas fa-circle-notch fa-spin text-red-600 text-4xl"></i><p class="mt-4 text-gray-500">Menyiapkan video...</p></div>';
 
-            sections.forEach(sec => {
-                if(!sec.books.length) return;
-                const section = document.createElement('div');
-                section.innerHTML = `
-                    <h2 class="text-xl font-bold text-white mb-4 border-l-4 border-red-600 pl-3">${sec.title}</h2>
-                    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 sm:gap-4">
-                        ${sec.books.map(b => `
-                            <div onclick="selectBook('${encodeURIComponent(JSON.stringify(b))}')" 
-                                 class="group cursor-pointer relative">
-                                <div class="aspect-poster rounded-lg overflow-hidden bg-zinc-800 mb-2 ring-1 ring-white/10 group-hover:ring-red-600 transition">
-                                    <img src="${b.cover}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500" loading="lazy" onerror="this.src='https://placehold.co/200x300?text=No+Image'">
-                                    <div class="absolute top-1 right-1 bg-black/80 backdrop-blur text-[10px] px-1.5 py-0.5 rounded text-white font-bold shadow">${b.episodes} Eps</div>
-                                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                                        <i class="fas fa-play-circle text-4xl text-red-600 drop-shadow-lg transform scale-50 group-hover:scale-100 transition"></i>
-                                    </div>
-                                </div>
-                                <h3 class="text-xs sm:text-sm font-medium text-gray-300 group-hover:text-white line-clamp-2 leading-tight">${b.title}</h3>
-                            </div>
-                        `).join('')}
+            try {
+                // Panggil API Backend (yang sudah pakai trik Webfic + BatchDownload)
+                const res = await fetch(`${API_BASE}?type=chapter&bookId=${bookId}`);
+                const json = await res.json();
+
+                if (json.error) throw new Error(json.error);
+
+                const chapters = json.chapters || [];
+                const currentChap = chapters.find(c => c.index === chapterIndex) || chapters[0];
+                
+                if (!currentChap) throw new Error("Episode tidak ditemukan");
+
+                // Render Template Player
+                const tpl = document.getElementById('tpl-player').content.cloneNode(true);
+                
+                // Set Data
+                tpl.getElementById('drama-title').innerText = json.title || `Drama ${bookId}`;
+                tpl.getElementById('ep-num').innerText = currentChap.index;
+                
+                // Set Video
+                const videoEl = tpl.getElementById('video-el');
+                videoEl.src = currentChap.url;
+                videoEl.poster = json.cover || '';
+
+                // Set Tombol Prev/Next
+                const btnPrev = tpl.getElementById('btn-prev');
+                const btnNext = tpl.getElementById('btn-next');
+
+                if (chapterIndex > 1) {
+                    btnPrev.href = `/player/${bookId}/${chapterIndex - 1}`;
+                    btnPrev.onclick = navigate;
+                } else {
+                    btnPrev.classList.add('opacity-50', 'cursor-not-allowed');
+                    btnPrev.removeAttribute('href');
+                }
+
+                if (chapterIndex < chapters.length) {
+                    btnNext.href = `/player/${bookId}/${chapterIndex + 1}`;
+                    btnNext.onclick = navigate;
+                } else {
+                    btnNext.classList.add('opacity-50', 'cursor-not-allowed');
+                    btnNext.removeAttribute('href');
+                }
+
+                // Render Grid Episode
+                const grid = tpl.getElementById('ep-grid');
+                let gridHtml = '';
+                chapters.forEach(ch => {
+                    const isActive = ch.index === chapterIndex ? 'bg-red-600 text-white border-red-600' : 'bg-zinc-800 text-gray-400 hover:bg-zinc-700 hover:text-white border-transparent';
+                    gridHtml += `<a href="/player/${bookId}/${ch.index}" onclick="navigate(event)" class="block text-center py-2 rounded border ${isActive} text-xs font-bold transition">${ch.index}</a>`;
+                });
+                grid.innerHTML = gridHtml;
+
+                app.innerHTML = '';
+                app.appendChild(tpl);
+                
+                // Update Title Browser
+                document.title = `Nonton ${json.title} - Eps ${chapterIndex}`;
+                
+                // Scroll ke atas
+                window.scrollTo(0, 0);
+
+            } catch (e) {
+                app.innerHTML = `
+                    <div class="text-center py-40 px-4">
+                        <i class="fas fa-exclamation-circle text-red-600 text-5xl mb-4"></i>
+                        <h1 class="text-2xl font-bold text-white">Video Tidak Tersedia</h1>
+                        <p class="text-gray-400 mt-2 max-w-md mx-auto">${e.message}</p>
+                        <a href="/" onclick="navigate(event)" class="mt-6 inline-block px-6 py-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition">Kembali ke Home</a>
                     </div>
                 `;
-                container.appendChild(section);
-            });
-        }
-
-        window.selectBook = (str) => openDetail(JSON.parse(decodeURIComponent(str)));
-
-        function openDetail(book, push = true) {
-            if(push) history.pushState({view: 'detail', data: book}, book.title, `?drama=${book.id}`);
-            renderDetail(book);
-        }
-
-        function renderDetail(book) {
-            document.getElementById('view-home').classList.add('hidden');
-            document.getElementById('view-detail').classList.remove('hidden');
-            window.scrollTo(0,0);
-
-            document.getElementById('d-title').innerText = book.title;
-            document.getElementById('d-desc').innerText = book.desc;
-            document.getElementById('d-cover').src = book.cover;
-            document.getElementById('d-eps').innerText = book.episodes;
-            
-            const tags = document.getElementById('d-tags');
-            if(book.tags) tags.innerHTML = book.tags.map(t => `<span class="bg-white/10 text-xs px-2 py-1 rounded text-gray-300 border border-white/5">${t}</span>`).join('');
-
-            const grid = document.getElementById('d-chapters');
-            grid.innerHTML = '<div class="col-span-full py-12 text-center text-gray-500 animate-pulse">Sedang memuat video...</div>';
-
-            fetch(`${API}?type=chapter&bookId=${book.id}`)
-                .then(r => r.json())
-                .then(json => {
-                    grid.innerHTML = '';
-                    if(json.error) {
-                        grid.innerHTML = `<div class="col-span-full text-center text-red-500 bg-red-900/10 p-4 rounded border border-red-900/50">${json.error}</div>`;
-                        return;
-                    }
-                    if(json.chapters) {
-                        json.chapters.forEach(ch => {
-                            const btn = document.createElement('button');
-                            btn.className = "bg-zinc-800 hover:bg-red-600 text-gray-300 hover:text-white py-2.5 rounded font-bold text-sm transition border border-white/5 hover:border-red-500";
-                            btn.innerText = ch.index;
-                            btn.onclick = () => playVideo(ch.url, ch.title);
-                            grid.appendChild(btn);
-                        });
-                    }
-                })
-                .catch(e => {
-                    grid.innerHTML = `<div class="col-span-full text-center text-red-500">Gagal memuat: ${e.message}</div>`;
-                });
-        }
-
-        function playVideo(url, title) {
-            const v = document.getElementById('vid-player');
-            const overlay = document.getElementById('player-overlay');
-            const fallback = document.getElementById('fallback-link');
-            
-            // Set Link Fallback
-            fallback.href = url;
-            fallback.classList.remove('hidden');
-
-            v.src = url;
-            overlay.classList.remove('hidden');
-
-            // Tangani Promise Play agar tidak error di console
-            const playPromise = v.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.log("Autoplay prevented/interrupted:", error);
-                    // Jangan panik, user bisa klik play manual
-                });
             }
         }
 
-        window.closePlayer = () => {
-            const v = document.getElementById('vid-player');
-            v.pause();
-            v.src = ''; // Reset src agar berhenti buffering
-            document.getElementById('player-overlay').classList.add('hidden');
-        }
-
-        window.goHome = (push = true) => {
-            if(push) history.pushState({view: 'home'}, 'Home', '/');
-            document.getElementById('view-detail').classList.add('hidden');
-            document.getElementById('view-home').classList.remove('hidden');
-            document.getElementById('search-input').value = '';
-        }
-
-        function showLoading(show) {
-            document.getElementById('loading').classList.toggle('hidden', !show);
-        }
-
-        function findBook(id) {
-            if(!homeData) return null;
-            for(let sec of homeData) {
-                const found = sec.books.find(b => b.id == id);
-                if(found) return found;
+        // --- SEARCH ---
+        document.getElementById('search-input').addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                const q = e.target.value;
+                if(!q) return;
+                
+                const app = document.getElementById('app');
+                app.innerHTML = '<div class="text-center py-20">Mencari...</div>';
+                
+                try {
+                    const res = await fetch(`${API_BASE}?type=search&keyword=${encodeURIComponent(q)}`);
+                    const json = await res.json();
+                    
+                    // Paksa render ulang home dengan data hasil search
+                    homeCache = json.sections; 
+                    renderHome();
+                    history.pushState({}, "", "/"); // Reset URL ke home
+                } catch(err) { console.error(err); }
             }
-            return null;
-        }
+        });
+
+        // Start Router
+        router();
+
     </script>
 </body>
 </html>
