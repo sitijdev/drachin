@@ -192,7 +192,9 @@ export async function onRequest(context) {
     if (type === 'chapter' && bookId) {
       const cacheKey = `unlock_v10_${bookId}_lang_${lang}`;
 
-      // KV cache read with age check and nocache support
+      // KV cache read with age check and nocache support.
+      // IMPORTANT: if cached exists but any chapter has empty sources [], force fetch fresh.
+      let useCache = false;
       if (env.DRAMABOX_CACHE && !noCache) {
         try {
           const cachedRaw = await env.DRAMABOX_CACHE.get(cacheKey);
@@ -200,7 +202,12 @@ export async function onRequest(context) {
             const cachedObj = JSON.parse(cachedRaw);
             const cachedAt = cachedObj._cachedAt || 0;
             const age = Date.now() - cachedAt;
-            if (age < CACHE_MAX_AGE_MS) {
+            // detect any empty sources in cached chapters
+            const chapters = Array.isArray(cachedObj.chapters) ? cachedObj.chapters : [];
+            const hasEmptySources = chapters.some(ch => !Array.isArray(ch.sources) || ch.sources.length === 0);
+            if (hasEmptySources) {
+              console.log(`Cache contains empty sources for ${cacheKey}; forcing refresh from server.`);
+            } else if (age < CACHE_MAX_AGE_MS) {
               console.log(`Returning KV cache for ${cacheKey}, age=${Math.round(age/1000)}s`);
               return new Response(JSON.stringify({ ...cachedObj, _source: 'CACHE' }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
             } else {
@@ -251,7 +258,6 @@ export async function onRequest(context) {
                   type: v.type || null
                 })).filter(s => s.url).sort((a,b) => (b.q||0)-(a.q||0));
               }
-              // subtitles/audio extraction (best-effort)
               let subtitles = [];
               const candidateSubLists = [ cdn?.subtitleList, cdn?.srtList, entry?.subtitleList, entry?.subtitles, entry?.srtList, entry?.sub ];
               for (const s of candidateSubLists) {
@@ -297,7 +303,7 @@ export async function onRequest(context) {
           }
         } catch (e) {
           console.log('batchDownload chunk failed', e?.message || e);
-          // continue with other chunks; we'll fallback to mp4 if present or leave empty
+          // continue with other chunks
         }
       }
 
