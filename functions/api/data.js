@@ -1,28 +1,28 @@
 // ============================================================================
-// 1. KONFIGURASI KREDENSIAL (SEKARANG DIGUNAKAN UNTUK PROXY)
+// 1. KONFIGURASI PROXY & ENDPOINT
+//    URL Proxy eksternal yang berfungsi
 // ============================================================================
 
-// URL Proxy PHP Eksternal yang berfungsi
 const EXTERNAL_PHP_PROXY_URL = "https://dramabox-api.d5studio.site/proxy.php"; 
 
 const WEB_FIC_URL = "https://www.webfic.com";
 const SERIES_JSON_PATH = "/series.json";
-const TOKEN_KEY = "DBOX_AUTH_TOKEN_V2"; // Tetap pertahankan KV Key untuk cache video
-
+const TOKEN_KEY = "DBOX_AUTH_TOKEN_V2"; // Tetap digunakan untuk KV cache
 
 // ============================================================================
 // 2. FUNGSI UTAMA FETCH MELALUI PROXY EKSTERNAL
-//    Fungsi ini mengirim payload dan endpoint target ke proxy PHP.
+//    Fungsi ini meneruskan endpoint target dan payload ke proxy PHP.
 // ============================================================================
 
 /**
  * Mengirim request API Dramabox melalui proxy eksternal.
+ * Asumsi: Proxy eksternal yang bertanggung jawab untuk otentikasi penuh.
  * @param {string} endpoint - Contoh: /drama-box/chapterv2/batchDownload
  * @param {object} payload - Body request ke API asli
  */
 async function fetchFromDramaBox(endpoint, payload) {
     
-    // Target endpoint dikirim sebagai query parameter 'target' ke proxy PHP
+    // Worker menjadi relay dengan meneruskan endpoint target melalui query param 'target'
     const proxyTargetUrl = `${EXTERNAL_PHP_PROXY_URL}?target=${encodeURIComponent(endpoint)}`;
 
     try {
@@ -37,19 +37,18 @@ async function fetchFromDramaBox(endpoint, payload) {
         if (!res.ok) {
             const errorText = await res.text();
             console.error(`[PROXY ERROR] ${res.status}: ${errorText}`);
-            throw new Error(`Proxy Error ${res.status}. Cek status proxy.`);
+            throw new Error(`Proxy Error ${res.status}.`);
         }
         
         const json = await res.json();
         
         if (json.error || json.status === 'ERROR') {
-             throw new Error(json.message || "Proxy mengembalikan error. Token proxy mungkin kedaluwarsa.");
+             throw new Error(json.message || "Proxy mengembalikan error. Akses mungkin diblokir.");
         }
         
         return json;
 
     } catch (e) {
-        console.error(`[FETCH ERROR]: ${e.message}`, e.stack);
         // Mengembalikan struktur yang sama seperti error API sebelumnya
         return { error: true, message: e.message };
     }
@@ -57,7 +56,7 @@ async function fetchFromDramaBox(endpoint, payload) {
 
 
 // ============================================================================
-// 3. HELPER & UTILITIES (Disederhanakan)
+// 3. HELPER & UTILITIES
 // ============================================================================
 
 function jsonResponse(data, source) {
@@ -91,14 +90,14 @@ function mapLocalBook(b) {
 // ============================================================================
 
 export async function onRequest(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const type = url.searchParams.get("type");
+  const bookId = url.searchParams.get("bookId");
+  const keyword = url.searchParams.get("keyword");
+  const SERIES_JSON_URL = `${url.origin}${SERIES_JSON_PATH}`;
+  
   try {
-    const { request, env } = context;
-    const url = new URL(request.url);
-    const type = url.searchParams.get("type");
-    const bookId = url.searchParams.get("bookId");
-    const keyword = url.searchParams.get("keyword");
-    const SERIES_JSON_URL = `${url.origin}${SERIES_JSON_PATH}`;
-    
     // --- B. LIST (HOME) ---
     if (type === "list") {
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
@@ -129,7 +128,7 @@ export async function onRequest(context) {
         if (cached) return jsonResponse(cached, "CACHE");
       }
 
-      // 1. Ambil Metadata dari Webfic 
+      // 1. Ambil Metadata dari Webfic (Webfic tidak memerlukan proxy)
       const webficRes = await fetch(`${WEB_FIC_URL}/webfic/book/detail/v2?id=${bookId}&tlanguage=in`);
       if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data drama (Webfic)" }, "ERR");
       
