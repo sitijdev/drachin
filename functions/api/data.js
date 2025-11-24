@@ -1,7 +1,17 @@
-// Cloudflare Worker - data API (single source: Dramabox + Webfic)
-// Exports: onRequest(context)
-// NOTE: Hardcoded credentials for development. Move to secrets for production.
-
+// Cloudflare Worker - data API with KV-backed sessions
+// - Single source: Webfic (metadata) + SAPI Dramabox (batchDownload)
+// - KV namespaces required: DRAMABOX_CACHE, SESSIONS (bind in Pages/Wrangler)
+// - Session stored server-side in SESSIONS KV; cookie set once per new visitor
+// - If cached chapters contain any sources: [], the cache is ignored and fresh fetch is performed
+// - Query params:
+//     nocache=1    -> force fresh fetch (bypass cache)
+//     lang=<code>  -> preferred language (id,en,ms,zh,es)
+// - Response includes header X-Cache-Status: HIT | MISS | FORCED | BYPASS
+//
+// NOTE: This file includes development hardcoded credentials. For production move secrets to worker secrets.
+//
+// Save as: functions/api/data.js
+/* eslint-env serviceworker */
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
 nbY3irfKdkEllAU2OORnAjlXDyCzcm2Z6ZRrGvtTZUAMelfU5PWS6XGEm3d4kJEK
@@ -46,24 +56,71 @@ const LANG_MAP = {
   es: { webfic: 'es', drama: 'es' }
 };
 
-// Cache config
 const CACHE_MAX_AGE_MS = 1000 * 60 * 30; // 30 minutes
-const CHUNK_SIZE = 60; // for batchDownload per request
+const CHUNK_SIZE = 60; // chunking for batchDownload
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days session TTL
 
-/* -------------------- Worker helpers -------------------- */
+/* -------------------- Session helpers (KV-backed) -------------------- */
+// Requires KV binding: env.SESSIONS
 
-function normalizeRequestedLang(reqLang, acceptLangHeader) {
-  if (reqLang && typeof reqLang === 'string') {
-    const l = reqLang.toLowerCase().split(/[_-]/)[0];
-    if (LANG_MAP[l]) return l;
-  }
-  if (acceptLangHeader) {
-    const first = acceptLangHeader.split(',')[0].split(';')[0].trim().toLowerCase();
-    const l = first.split(/[_-]/)[0];
-    if (LANG_MAP[l]) return l;
-  }
-  return 'id';
+function parseCookies(cookieHeader) {
+  const out = {};
+  if (!cookieHeader) return out;
+  cookieHeader.split(';').forEach(pair => {
+    const [k, ...v] = pair.split('=');
+    if (!k) return;
+    out[k.trim()] = decodeURIComponent((v || []).join('=').trim());
+  });
+  return out;
 }
+
+function makeSetCookieHeader(sessionId, maxAge = SESSION_TTL_SECONDS) {
+  // HttpOnly, Secure, SameSite=Lax
+  return `session_id=${encodeURIComponent(sessionId)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+}
+
+async function loadSession(env, cookieHeader) {
+  const cookies = parseCookies(cookieHeader);
+  let sessionId = cookies['session_id'];
+  if (!sessionId) {
+    // create new
+    sessionId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
+    const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
+    if (env.SESSIONS) {
+      await env.SESSIONS.put(`s:${sessionId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
+    }
+    return { id: sessionId, data: newSession, setCookie: makeSetCookieHeader(sessionId) };
+  } else {
+    if (!env.SESSIONS) {
+      // No KV bound; return ephemeral session object without persistence
+      return { id: sessionId, data: { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null }, setCookie: null };
+    }
+    const raw = await env.SESSIONS.get(`s:${sessionId}`);
+    if (!raw) {
+      const newId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
+      const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
+      await env.SESSIONS.put(`s:${newId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
+      return { id: newId, data: newSession, setCookie: makeSetCookieHeader(newId) };
+    }
+    try {
+      const data = JSON.parse(raw);
+      return { id: sessionId, data, setCookie: null };
+    } catch (e) {
+      const newId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
+      const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
+      await env.SESSIONS.put(`s:${newId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
+      return { id: newId, data: newSession, setCookie: makeSetCookieHeader(newId) };
+    }
+  }
+}
+
+async function storeSession(env, sessionId, sessionData) {
+  if (!env.SESSIONS) return;
+  sessionData.updatedAt = Date.now();
+  await env.SESSIONS.put(`s:${sessionId}`, JSON.stringify(sessionData), { expirationTtl: SESSION_TTL_SECONDS });
+}
+
+/* -------------------- Crypto / Dramabox helpers -------------------- */
 
 async function importPrivateKey(pem) {
   const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/g, '').replace(/-----END PRIVATE KEY-----/g, '').replace(/\s+/g, '');
@@ -77,27 +134,27 @@ async function createSignature(payload) {
   const encoder = new TextEncoder();
   const data = encoder.encode(toSignString);
   const key = await importPrivateKey(PRIVATE_KEY_PEM);
-  const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
+  const signatureBuffer = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, data);
   return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
 }
 
 async function fetchFromDramaBox(endpoint, payload, language = 'in') {
   const signature = await createSignature(payload);
   const headers = {
-    "Host": "sapi.dramaboxdb.com",
-    "Tn": `Bearer ${MANUAL_TOKEN}`,
-    "Version": FAKE_APP_VERSION,
-    "Vn": FAKE_VN_VERSION,
-    "Package-Name": "com.storymatrix.drama",
-    "Device-Id": MANUAL_DEVICE_ID,
-    "Userid": MANUAL_USER_ID,
-    "Android-Id": MANUAL_ANDROID_ID,
-    "Content-Type": "application/json; charset=UTF-8",
-    "User-Agent": "okhttp/4.10.0",
-    "sn": signature,
-    "Language": language,
-    "Current-Language": language,
-    "Time-Zone": "+0700"
+    'Host': 'sapi.dramaboxdb.com',
+    'Tn': `Bearer ${MANUAL_TOKEN}`,
+    'Version': FAKE_APP_VERSION,
+    'Vn': FAKE_VN_VERSION,
+    'Package-Name': 'com.storymatrix.drama',
+    'Device-Id': MANUAL_DEVICE_ID,
+    'Userid': MANUAL_USER_ID,
+    'Android-Id': MANUAL_ANDROID_ID,
+    'Content-Type': 'application/json; charset=UTF-8',
+    'User-Agent': 'okhttp/4.10.0',
+    'sn': signature,
+    'Language': language,
+    'Current-Language': language,
+    'Time-Zone': '+0700'
   };
   const resp = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
     method: 'POST',
@@ -105,61 +162,59 @@ async function fetchFromDramaBox(endpoint, payload, language = 'in') {
     body: JSON.stringify(payload)
   });
   if (!resp.ok) {
-    console.log('fetchFromDramaBox failed', resp.status, await resp.text().catch(()=>null));
+    const text = await resp.text().catch(()=>null);
+    console.log('fetchFromDramaBox failed', resp.status, text);
     return {};
   }
   return await resp.json();
 }
 
-function jsonResponse(data, source) {
-  return new Response(JSON.stringify({ ...data, _source: source }), {
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
-  });
-}
+/* -------------------- Utility helpers -------------------- */
 
-async function fetchSeriesDB(url) {
-  try {
-    const res = await fetch(url);
-    if (res.ok) return await res.json();
-    return [];
-  } catch (e) {
-    return [];
-  }
-}
-function mapLocalBook(b) {
-  return {
-    id: b.source_id || b.id,
-    title: b.title,
-    cover: b.cover_path,
-    episodes: "Full",
-    desc: b.description,
-    tags: ["Series"]
-  };
+function jsonResponseWithHeaders(data, source, extraHeaders = {}) {
+  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': source, ...extraHeaders };
+  return new Response(JSON.stringify({ ...data, _source: source }), { headers });
 }
 
 /* -------------------- Main Worker handler -------------------- */
 
 export async function onRequest(context) {
+  const { request, env } = context;
   try {
-    const { request, env } = context;
     const url = new URL(request.url);
     const type = url.searchParams.get('type');
     const bookId = url.searchParams.get('bookId');
     const keyword = url.searchParams.get('keyword');
     const reqLang = url.searchParams.get('lang');
     const acceptLang = request.headers.get('Accept-Language') || '';
-    const lang = normalizeRequestedLang(reqLang, acceptLang);
+    const lang = (function normalizeRequestedLang(reqLangInner, acceptHeader) {
+      if (reqLangInner && typeof reqLangInner === 'string') {
+        const l = reqLangInner.toLowerCase().split(/[_-]/)[0];
+        if (LANG_MAP[l]) return l;
+      }
+      if (acceptHeader) {
+        const first = acceptHeader.split(',')[0].split(';')[0].trim().toLowerCase();
+        const l = first.split(/[_-]/)[0];
+        if (LANG_MAP[l]) return l;
+      }
+      return 'id';
+    })(reqLang, acceptLang);
     const webficLang = (LANG_MAP[lang] && LANG_MAP[lang].webfic) || 'in';
     const dramaLang = (LANG_MAP[lang] && LANG_MAP[lang].drama) || 'in';
     const noCache = url.searchParams.get('nocache') === '1';
 
-    // --- SEARCH ---
+    // load session (may create and setCookie)
+    const cookieHeader = request.headers.get('Cookie') || '';
+    const session = await loadSession(env, cookieHeader);
+    // session: { id, data, setCookie }
+
+    // SEARCH
     if (type === 'search' && keyword) {
       const SERIES_JSON_URL = `${url.origin}/series.json`;
-      const localData = await fetchSeriesDB(SERIES_JSON_URL);
-      const localResults = localData.filter(b => b.title.toLowerCase().includes(keyword.toLowerCase())).map(mapLocalBook);
+      const localData = await (async u => { try { const r = await fetch(u); if (r.ok) return await r.json(); return []; } catch { return []; } })(SERIES_JSON_URL);
+      const localResults = (localData || []).filter(b => String(b.title || '').toLowerCase().includes(keyword.toLowerCase())).map(b => ({ id: b.source_id||b.id, title: b.title, cover: b.cover_path, episodes: 'Full', desc: b.description, tags: ['Series'] }));
 
-      const payload = { searchSource: "搜索按钮", pageNo: 1, pageSize: 20, from: "search_sug", keyword };
+      const payload = { searchSource: '搜索按钮', pageNo: 1, pageSize: 20, from: 'search_sug', keyword };
       const rawData = await fetchFromDramaBox('/drama-box/search/search', payload, dramaLang);
       const apiResults = (rawData.data?.searchList || []).map(item => ({
         id: item.bookId || item.id,
@@ -171,71 +226,90 @@ export async function onRequest(context) {
       }));
 
       const combined = [...localResults, ...apiResults];
-      const unique = combined.filter((v,i,a) => a.findIndex(t => (t.id === v.id)) === i);
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, 'SEARCH');
+      const unique = combined.filter((v,i,a) => a.findIndex(t => t.id === v.id) === i);
+      const res = jsonResponseWithHeaders({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
+      if (session.setCookie) await storeSession(env, session.id, session.data);
+      return res;
     }
 
-    // --- LIST ---
+    // LIST
     if (type === 'list') {
       const SERIES_JSON_URL = `${url.origin}/series.json`;
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
       const combinedSections = [];
       if (localData.length > 0) {
-        combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0,15).map(mapLocalBook) });
-        if (localData.length > 15) combinedSections.push({ title: "📺 Rekomendasi Spesial", books: localData.slice(15,35).map(mapLocalBook) });
-        if (localData.length > 35) combinedSections.push({ title: "✨ Koleksi Populer", books: localData.slice(35,100).map(mapLocalBook) });
+        combinedSections.push({ title: '🔥 Pilihan Editor', books: localData.slice(0,15).map(mapLocalBook) });
+        if (localData.length > 15) combinedSections.push({ title: '📺 Rekomendasi Spesial', books: localData.slice(15,35).map(mapLocalBook) });
+        if (localData.length > 35) combinedSections.push({ title: '✨ Koleksi Populer', books: localData.slice(35,100).map(mapLocalBook) });
       }
-      return jsonResponse({ sections: combinedSections }, 'LIST');
+      const res = jsonResponseWithHeaders({ sections: combinedSections }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
+      if (session.setCookie) await storeSession(env, session.id, session.data);
+      return res;
     }
 
-    // --- CHAPTER / DETAIL (MAIN) ---
+    // CHAPTER / DETAIL (MAIN)
     if (type === 'chapter' && bookId) {
       const cacheKey = `unlock_v10_${bookId}_lang_${lang}`;
 
       // KV cache read with age check and nocache support.
-      // IMPORTANT: if cached exists but any chapter has empty sources [], force fetch fresh.
-      let useCache = false;
+      // If cached exists but any chapter.sources === [], we must force a fresh fetch.
+      let cacheStatus = 'MISS';
+      let cachedObj = null;
       if (env.DRAMABOX_CACHE && !noCache) {
         try {
           const cachedRaw = await env.DRAMABOX_CACHE.get(cacheKey);
           if (cachedRaw) {
-            const cachedObj = JSON.parse(cachedRaw);
-            const cachedAt = cachedObj._cachedAt || 0;
+            const parsed = JSON.parse(cachedRaw);
+            const cachedAt = parsed._cachedAt || 0;
             const age = Date.now() - cachedAt;
-            // detect any empty sources in cached chapters
-            const chapters = Array.isArray(cachedObj.chapters) ? cachedObj.chapters : [];
-            const hasEmptySources = chapters.some(ch => !Array.isArray(ch.sources) || ch.sources.length === 0);
+            const chaptersArr = Array.isArray(parsed.chapters) ? parsed.chapters : [];
+            const hasEmptySources = chaptersArr.some(ch => !Array.isArray(ch.sources) || ch.sources.length === 0);
             if (hasEmptySources) {
+              // Rule: if any chapter has empty sources, bypass cache and fetch fresh
               console.log(`Cache contains empty sources for ${cacheKey}; forcing refresh from server.`);
+              cacheStatus = 'FORCED';
             } else if (age < CACHE_MAX_AGE_MS) {
-              console.log(`Returning KV cache for ${cacheKey}, age=${Math.round(age/1000)}s`);
-              return new Response(JSON.stringify({ ...cachedObj, _source: 'CACHE' }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+              cacheStatus = 'HIT';
+              cachedObj = parsed;
             } else {
               console.log(`Cache expired for ${cacheKey}, age=${Math.round(age/1000)}s; fetching fresh.`);
+              cacheStatus = 'MISS';
             }
           }
         } catch (e) {
           console.log('KV cache read/parse error', e);
+          cacheStatus = 'MISS';
         }
+      } else if (noCache) {
+        cacheStatus = 'BYPASS';
       }
 
-      // 1. metadata from webfic
+      if (cachedObj) {
+        // Return cached response but attach session cookie if created
+        const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': cacheStatus };
+        if (session.setCookie) headers['Set-Cookie'] = session.setCookie;
+        if (session.data) session.data.lastViewed = { bookId, timestamp: Date.now() };
+        if (session.setCookie) await storeSession(env, session.id, session.data);
+        return new Response(JSON.stringify({ ...cachedObj, _source: 'CACHE' }), { headers });
+      }
+
+      // Proceed to fetch fresh data from Webfic + Dramabox
+      // 1. Webfic metadata
       const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${encodeURIComponent(bookId)}&tlanguage=${encodeURIComponent(webficLang)}`);
       if (!webficRes.ok) {
         console.log('Webfic fetch failed', webficRes.status);
-        return jsonResponse({ error: 'Gagal mengambil data drama' }, 'ERR');
+        return jsonResponseWithHeaders({ error: 'Gagal mengambil data drama' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
       }
       const webficJson = await webficRes.json();
       const liveData = webficJson.data || {};
       const liveChapterList = liveData.chapterList || [];
       if (!Array.isArray(liveChapterList) || liveChapterList.length === 0) {
-        return jsonResponse({ error: 'Chapter tidak ditemukan' }, 'ERR');
+        return jsonResponseWithHeaders({ error: 'Chapter tidak ditemukan' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
       }
 
-      // 2. Unlock (batch) - chunked
+      // 2. Unlock batchDownload in chunks
       const chapterIds = liveChapterList.map(c => c.id).filter(Boolean);
-      const videoMap = {}; // key -> { sources, subtitles, audioTracks }
-
+      const videoMap = {};
       for (let i = 0; i < chapterIds.length; i += CHUNK_SIZE) {
         const chunk = chapterIds.slice(i, i + CHUNK_SIZE);
         try {
@@ -258,6 +332,8 @@ export async function onRequest(context) {
                   type: v.type || null
                 })).filter(s => s.url).sort((a,b) => (b.q||0)-(a.q||0));
               }
+
+              // subtitles/audio extraction (best-effort)
               let subtitles = [];
               const candidateSubLists = [ cdn?.subtitleList, cdn?.srtList, entry?.subtitleList, entry?.subtitles, entry?.srtList, entry?.sub ];
               for (const s of candidateSubLists) {
@@ -275,6 +351,7 @@ export async function onRequest(context) {
                   break;
                 }
               }
+
               let audioTracks = [];
               const candidateAudioLists = [ cdn?.audioPathList, entry?.audioList, entry?.audios, cdn?.audioList ];
               for (const a of candidateAudioLists) {
@@ -303,11 +380,11 @@ export async function onRequest(context) {
           }
         } catch (e) {
           console.log('batchDownload chunk failed', e?.message || e);
-          // continue with other chunks
+          // continue other chunks
         }
       }
 
-      // 3. build finalChapters
+      // 3. Build finalChapters from liveChapterList + videoMap
       const finalChapters = [];
       for (const chItem of liveChapterList) {
         const keyCandidates = [chItem.id, chItem.chapterId, chItem.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
@@ -328,7 +405,6 @@ export async function onRequest(context) {
           if (Array.isArray(mapped.audioTracks) && mapped.audioTracks.length) chapterObj.audioTracks = mapped.audioTracks;
         }
 
-        // fallback to ch.mp4
         if ((!chapterObj.sources || chapterObj.sources.length === 0) && chItem.mp4) {
           chapterObj.sources = [{ q: 480, url: chItem.mp4 }];
         }
@@ -336,7 +412,9 @@ export async function onRequest(context) {
         finalChapters.push(chapterObj);
       }
 
-      if (finalChapters.length === 0) return jsonResponse({ error: 'Video tidak tersedia.' }, 'ERR');
+      if (finalChapters.length === 0) {
+        return jsonResponseWithHeaders({ error: 'Video tidak tersedia.' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
+      }
 
       const result = {
         info: {
@@ -354,7 +432,7 @@ export async function onRequest(context) {
         related: (liveData.recommends || []).map(b => ({ id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount }))
       };
 
-      // store to KV with timestamp for age-based invalidation
+      // Save to KV with timestamp
       if (env.DRAMABOX_CACHE) {
         try {
           const payloadToStore = { ...result, _cachedAt: Date.now() };
@@ -364,12 +442,24 @@ export async function onRequest(context) {
         }
       }
 
-      return jsonResponse(result, 'SUCCESS');
+      // Update session lastViewed and clear per-book bypass flag if present
+      if (session && session.data) {
+        session.data.lastViewed = { bookId, timestamp: Date.now() };
+        if (session.data.cacheBypass && session.data.cacheBypass[bookId]) {
+          delete session.data.cacheBypass[bookId];
+        }
+        await storeSession(env, session.id, session.data);
+      }
+
+      const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': cacheStatus === 'FORCED' ? 'FORCED' : 'MISS' };
+      if (session.setCookie) headers['Set-Cookie'] = session.setCookie;
+      return new Response(JSON.stringify({ ...result, _source: 'SUCCESS' }), { headers });
     }
 
+    // default
     return new Response('Invalid Request', { status: 400 });
   } catch (err) {
     console.log('Unhandled error in onRequest', err);
-    return new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: err?.message || String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 }
