@@ -1,6 +1,5 @@
 // ============================================================================
-// 1. KONFIGURASI PROXY & ENDPOINT
-//    Semua permintaan API Dramabox (kecuali Webfic) akan dialihkan ke URL ini.
+// 1. KONFIGURASI KREDENSIAL (SEKARANG DIGUNAKAN UNTUK PROXY)
 // ============================================================================
 
 // URL Proxy PHP Eksternal yang berfungsi
@@ -8,21 +7,22 @@ const EXTERNAL_PHP_PROXY_URL = "https://dramabox-api.d5studio.site/proxy.php";
 
 const WEB_FIC_URL = "https://www.webfic.com";
 const SERIES_JSON_PATH = "/series.json";
+const TOKEN_KEY = "DBOX_AUTH_TOKEN_V2"; // Tetap pertahankan KV Key untuk cache video
+
 
 // ============================================================================
-// 2. LOGIKA FETCH MELALUI PROXY EKSTERNAL
+// 2. FUNGSI UTAMA FETCH MELALUI PROXY EKSTERNAL
+//    Fungsi ini mengirim payload dan endpoint target ke proxy PHP.
 // ============================================================================
 
 /**
  * Mengirim request API Dramabox melalui proxy eksternal.
- * * Karena proxy eksternal yang bertanggung jawab untuk autentikasi (token & signature),
- * Worker hanya perlu meneruskan endpoint target dan payload.
- * * @param {string} endpoint - Contoh: /drama-box/chapterv2/batchDownload
+ * @param {string} endpoint - Contoh: /drama-box/chapterv2/batchDownload
  * @param {object} payload - Body request ke API asli
  */
 async function fetchFromDramaBox(endpoint, payload) {
     
-    // Asumsi: Proxy menerima target endpoint sebagai query parameter.
+    // Target endpoint dikirim sebagai query parameter 'target' ke proxy PHP
     const proxyTargetUrl = `${EXTERNAL_PHP_PROXY_URL}?target=${encodeURIComponent(endpoint)}`;
 
     try {
@@ -30,7 +30,6 @@ async function fetchFromDramaBox(endpoint, payload) {
             method: "POST", 
             headers: { 
                 "Content-Type": "application/json",
-                // Opsional: Anda bisa menambahkan header User-Agent untuk proxy
             },
             body: JSON.stringify(payload)
         });
@@ -38,26 +37,27 @@ async function fetchFromDramaBox(endpoint, payload) {
         if (!res.ok) {
             const errorText = await res.text();
             console.error(`[PROXY ERROR] ${res.status}: ${errorText}`);
-            throw new Error(`Proxy Error ${res.status}. Mungkin API asli gagal.`);
+            throw new Error(`Proxy Error ${res.status}. Cek status proxy.`);
         }
         
         const json = await res.json();
         
         if (json.error || json.status === 'ERROR') {
-             throw new Error(json.message || "Proxy mengembalikan error. Token mungkin mati.");
+             throw new Error(json.message || "Proxy mengembalikan error. Token proxy mungkin kedaluwarsa.");
         }
         
         return json;
 
     } catch (e) {
-        console.        console.error(`[FETCH ERROR]: ${e.message}`, e.stack);
-        return { error: true, status: 500, message: e.message };
+        console.error(`[FETCH ERROR]: ${e.message}`, e.stack);
+        // Mengembalikan struktur yang sama seperti error API sebelumnya
+        return { error: true, message: e.message };
     }
 }
 
 
 // ============================================================================
-// 3. HELPER & UTILITIES
+// 3. HELPER & UTILITIES (Disederhanakan)
 // ============================================================================
 
 function jsonResponse(data, source) {
@@ -75,7 +75,6 @@ async function fetchSeriesDB(url) {
 }
 
 function mapLocalBook(b) {
-    // Digunakan untuk data dari series.json
     return {
         id: b.source_id || b.id,
         title: b.title,
@@ -92,28 +91,27 @@ function mapLocalBook(b) {
 // ============================================================================
 
 export async function onRequest(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  const type = url.searchParams.get("type");
-  const bookId = url.searchParams.get("bookId");
-  const keyword = url.searchParams.get("keyword");
-  const SERIES_JSON_URL = `${url.origin}${SERIES_JSON_PATH}`;
-  
   try {
+    const { request, env } = context;
+    const url = new URL(request.url);
+    const type = url.searchParams.get("type");
+    const bookId = url.searchParams.get("bookId");
+    const keyword = url.searchParams.get("keyword");
+    const SERIES_JSON_URL = `${url.origin}${SERIES_JSON_PATH}`;
+    
     // --- B. LIST (HOME) ---
     if (type === "list") {
       const localData = await fetchSeriesDB(SERIES_JSON_URL);
       
       const combinedSections = [];
       if (localData.length > 0) {
-          // Logika pembagian data dari series.json (disinkronkan dengan Home)
           combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0, 15).map(mapLocalBook) });
           if(localData.length > 15) combinedSections.push({ title: "📺 Rekomendasi Spesial", books: localData.slice(15, 35).map(mapLocalBook) });
       }
       return jsonResponse({ sections: combinedSections }, "LIST");
     }
 
-    // --- A. SEARCH (Local Search untuk kesederhanaan, bisa ditambahkan API search) ---
+    // --- A. SEARCH (Lokal) ---
     if (type === "search" && keyword) {
         const localData = await fetchSeriesDB(SERIES_JSON_URL);
         const localResults = localData.filter(b => 
@@ -123,7 +121,7 @@ export async function onRequest(context) {
         return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: localResults }] }, "SEARCH_LOCAL");
     }
 
-    // --- C. DETAIL & CHAPTER (UNLOCKER) ---
+    // --- C. DETAIL & CHAPTER (UNLOCKER via PROXY) ---
     if (type === "chapter" && bookId) {
       const cacheKey = `unlock_proxy_${bookId}`; 
       if (env.DRAMABOX_CACHE) {
@@ -131,7 +129,7 @@ export async function onRequest(context) {
         if (cached) return jsonResponse(cached, "CACHE");
       }
 
-      // 1. Ambil Metadata dari Webfic (Webfic tidak perlu token/proxy)
+      // 1. Ambil Metadata dari Webfic 
       const webficRes = await fetch(`${WEB_FIC_URL}/webfic/book/detail/v2?id=${bookId}&tlanguage=in`);
       if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data drama (Webfic)" }, "ERR");
       
@@ -186,7 +184,6 @@ export async function onRequest(context) {
               cover: liveData.book.cover,
               desc: liveData.book.introduction,
               tags: liveData.book.tags || [],
-              // Rekomendasi untuk ditampilkan di player
               related: (liveData.recommends || []).map(b => ({
                   id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount
               })),
@@ -195,7 +192,7 @@ export async function onRequest(context) {
           chapters: finalChapters
       };
 
-      // Simpan hasil unlock ke KV selama 30 menit
+      // Simpan hasil unlock ke KV
       if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
 
       return jsonResponse(result, "SUCCESS");
