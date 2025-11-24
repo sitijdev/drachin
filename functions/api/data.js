@@ -1,19 +1,6 @@
-// ============================================================================
-// data.js (Cloudflare Worker) - with direct backup scraper fallback (no PHP)
-// ============================================================================
-//
-// This full file:
-// - supports language param
-// - maps unlock API results (sources, subtitles, audioTracks)
-// - when sources are empty, attempts a direct backup scrape via BACKUP_URL (iddant.site/restAPI/)
-//   including necessary headers (Authorization + X-License-Key) so you don't need a PHP proxy
-// - uses async for..of to await backup calls per chapter when needed
-// - caches final result per bookId+lang in KV if available (DRAMABOX_CACHE)
-// - IMPORTANT: This file contains tokens/keys that were provided earlier in the conversation.
-//   Keep them secret in production; prefer storing sensitive values in environment variables.
-//
-// Deploy this as your Cloudflare Pages Function / Worker handler (exported onRequest).
-// ============================================================================
+// Cloudflare Worker - data API (single source: Dramabox + Webfic)
+// Exports: onRequest(context)
+// NOTE: Hardcoded credentials for development. Move to secrets for production.
 
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
@@ -51,11 +38,6 @@ const MANUAL_USER_ID = "336084056";
 const FAKE_APP_VERSION = "451";
 const FAKE_VN_VERSION = "4.5.1";
 
-// This token/header pair comes from your provided PHP snippet (used by the iddant.site wrapper)
-const BACKUP_AUTH = "3203fccb29d361eac970918731d68255abc9c7907fba4b54f432743f754f62f3";
-const BACKUP_LICENSE = "public";
-
-// Map frontend/lang codes to webfic/dramabox codes (best-effort)
 const LANG_MAP = {
   id: { webfic: 'in', drama: 'in' },
   en: { webfic: 'en', drama: 'en' },
@@ -64,9 +46,11 @@ const LANG_MAP = {
   es: { webfic: 'es', drama: 'es' }
 };
 
-// Direct backup endpoint (call iddant.site/restAPI/ directly)
-// If you later host your own PHP wrapper, change this to your proxy URL.
-const BACKUP_URL = 'https://iddant.site/restAPI/';
+// Cache config
+const CACHE_MAX_AGE_MS = 1000 * 60 * 30; // 30 minutes
+const CHUNK_SIZE = 60; // for batchDownload per request
+
+/* -------------------- Worker helpers -------------------- */
 
 function normalizeRequestedLang(reqLang, acceptLangHeader) {
   if (reqLang && typeof reqLang === 'string') {
@@ -81,341 +65,21 @@ function normalizeRequestedLang(reqLang, acceptLangHeader) {
   return 'id';
 }
 
-export async function onRequest(context) {
-  try {
-    const { request, env } = context;
-    const url = new URL(request.url);
-    const type = url.searchParams.get("type");
-    const bookId = url.searchParams.get("bookId");
-    const keyword = url.searchParams.get("keyword");
-    const reqLang = url.searchParams.get("lang");
-    const acceptLang = request.headers.get('Accept-Language') || '';
-    const lang = normalizeRequestedLang(reqLang, acceptLang);
-    const webficLang = (LANG_MAP[lang] && LANG_MAP[lang].webfic) || 'in';
-    const dramaLang = (LANG_MAP[lang] && LANG_MAP[lang].drama) || 'in';
-
-    const SERIES_JSON_URL = `${url.origin}/series.json`;
-
-    // --- A. SEARCH ---
-    if (type === "search" && keyword) {
-      const localData = await fetchSeriesDB(SERIES_JSON_URL);
-      const localResults = localData.filter(b =>
-        b.title.toLowerCase().includes(keyword.toLowerCase())
-      ).map(mapLocalBook);
-
-      const payload = {
-        searchSource: "搜索按钮", pageNo: 1, pageSize: 20, from: "search_sug", keyword: keyword
-      };
-      const rawData = await fetchFromDramaBox("/drama-box/search/search", payload, dramaLang);
-      const apiResults = (rawData.data?.searchList || []).map(item => ({
-          id: item.bookId || item.id,
-          title: item.bookName || item.title,
-          cover: item.cover || item.bookCover,
-          episodes: item.chapterCount || "?",
-          desc: item.introduction || "Hasil pencarian",
-          tags: item.tags || []
-      }));
-
-      const combined = [...localResults, ...apiResults];
-      const unique = combined.filter((v,i,a)=>a.findIndex(t=>(t.id === v.id))===i);
-      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, "SEARCH");
-    }
-
-    // --- B. LIST (HOME) ---
-    if (type === "list") {
-      const localData = await fetchSeriesDB(SERIES_JSON_URL);
-      const combinedSections = [];
-
-      if (localData.length > 0) {
-          combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0, 15).map(mapLocalBook) });
-          if(localData.length > 15) combinedSections.push({ title: "📺 Rekomendasi Spesial", books: localData.slice(15, 35).map(mapLocalBook) });
-          if(localData.length > 35) combinedSections.push({ title: "✨ Koleksi Populer", books: localData.slice(35, 100).map(mapLocalBook) });
-      }
-      return jsonResponse({ sections: combinedSections }, "LIST");
-    }
-
-    // --- C. DETAIL & CHAPTER (UNLOCKER V3) ---
-    if (type === "chapter" && bookId) {
-      const cacheKey = `unlock_v10_${bookId}_lang_${lang}`;
-      if (env.DRAMABOX_CACHE) {
-        const cached = await env.DRAMABOX_CACHE.get(cacheKey);
-        if (cached) return jsonResponse(JSON.parse(cached), "CACHE");
-      }
-
-      // 1. metadata from webfic with tlanguage
-      const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${encodeURIComponent(bookId)}&tlanguage=${encodeURIComponent(webficLang)}`);
-      if (!webficRes.ok) return jsonResponse({ error: "Gagal mengambil data drama" }, "ERR");
-      const webficJson = await webficRes.json();
-      const liveData = webficJson.data;
-      const liveChapterList = liveData?.chapterList || [];
-      if (liveChapterList.length === 0) return jsonResponse({ error: "Chapter tidak ditemukan" }, "ERR");
-
-      // 2. unlock (batch)
-      const allChapterIds = liveChapterList.map(ch => ch.id);
-      const unlockData = await fetchFromDramaBox("/drama-box/chapterv2/batchDownload", {
-          bookId: bookId,
-          chapterIdList: allChapterIds
-      }, dramaLang);
-
-      // 3. mapping from unlockData
-      const videoMap = {};
-      if (unlockData?.data?.chapterVoList) {
-          unlockData.data.chapterVoList.forEach(ch => {
-              const keys = [];
-              if (ch.chapterId !== undefined && ch.chapterId !== null) keys.push(ch.chapterId);
-              if (ch.chapter_id !== undefined && ch.chapter_id !== null) keys.push(ch.chapter_id);
-              if (ch.id !== undefined && ch.id !== null) keys.push(ch.id);
-
-              const cdn = ch.cdnList?.find(c => c.isDefault === 1) || ch.cdnList?.[0];
-
-              let sourcesArr = [];
-              if (cdn && Array.isArray(cdn.videoPathList) && cdn.videoPathList.length) {
-                  sourcesArr = cdn.videoPathList.map(v => ({
-                      q: v.quality || (v.q ? Number(v.q) : 0),
-                      url: v.videoPath || v.url || v.path || v.src,
-                      lang: v.language || v.lang || null,
-                      type: v.type || null
-                  })).filter(s => s.url).sort((a,b) => (b.q||0)-(a.q||0));
-              }
-
-              let subtitles = [];
-              const candidateSubLists = [ cdn?.subtitleList, cdn?.srtList, ch?.subtitleList, ch?.subtitles, ch?.srtList, ch?.sub ];
-              for (const s of candidateSubLists) {
-                  if (!s) continue;
-                  if (Array.isArray(s) && s.length) {
-                      s.forEach(it => {
-                          if (!it) return;
-                          if (typeof it === 'string') subtitles.push({ lang: 'und', url: it });
-                          else {
-                              const urlCandidate = it.url || it.path || it.srt || it.subtitlePath || it.uri;
-                              const langCandidate = it.lang || it.language || it.code || it.label || 'und';
-                              if (urlCandidate) subtitles.push({ lang: langCandidate, url: urlCandidate });
-                          }
-                      });
-                      break;
-                  }
-              }
-
-              let audioTracks = [];
-              const candidateAudioLists = [ cdn?.audioPathList, ch?.audioList, ch?.audios, cdn?.audioList ];
-              for (const a of candidateAudioLists) {
-                  if (!a) continue;
-                  if (Array.isArray(a) && a.length) {
-                      a.forEach(it => {
-                          if (!it) return;
-                          if (typeof it === 'string') audioTracks.push({ lang: 'und', url: it });
-                          else {
-                              const urlCandidate = it.url || it.path || it.audioPath || it.uri;
-                              const langCandidate = it.lang || it.language || it.code || it.label || 'und';
-                              if (urlCandidate) audioTracks.push({ lang: langCandidate, url: urlCandidate });
-                          }
-                      });
-                      break;
-                  }
-              }
-
-              if (keys.length) {
-                  keys.forEach(k => {
-                      if (k === undefined || k === null) return;
-                      videoMap[String(k)] = {
-                          sources: sourcesArr || [],
-                          subtitles: subtitles || [],
-                          audioTracks: audioTracks || []
-                      };
-                  });
-              }
-          });
-      }
-
-      // -- 4. build finalChapters (async to allow backup calls) --
-      const finalChapters = [];
-      for (const ch of liveChapterList) {
-          const keyCandidates = [ch.id, ch.chapterId, ch.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
-          let mapped = null;
-          for (const k of keyCandidates) {
-              if (!k) continue;
-              if (videoMap[k]) { mapped = videoMap[k]; break; }
-          }
-
-          const chapterObj = {
-              index: ch.index,
-              title: ch.name || ch.chapterName || `Episode ${ch.index}`,
-              sources: [],
-              subtitles: [],
-              audioTracks: []
-          };
-
-          if (mapped) {
-              if (Array.isArray(mapped.sources) && mapped.sources.length) chapterObj.sources = mapped.sources;
-              if (Array.isArray(mapped.subtitles) && mapped.subtitles.length) chapterObj.subtitles = mapped.subtitles;
-              if (Array.isArray(mapped.audioTracks) && mapped.audioTracks.length) chapterObj.audioTracks = mapped.audioTracks;
-          }
-
-          // fallback to ch.mp4 if present
-          if ((!chapterObj.sources || chapterObj.sources.length === 0) && ch.mp4) {
-              chapterObj.sources = [{ q: 480, url: ch.mp4 }];
-          }
-
-          // If still empty, try backup scrape (only for empty sources)
-          if ((!chapterObj.sources || chapterObj.sources.length === 0)) {
-              try {
-                  const tryId = ch.id || ch.chapterId || ch.chapter_id || bookId;
-                  if (tryId) {
-                      const backupResult = await fetchFromBackup(tryId, lang);
-                      if (backupResult && (Array.isArray(backupResult.sources) && backupResult.sources.length)) {
-                          chapterObj.sources = backupResult.sources;
-                      }
-                      if (backupResult && Array.isArray(backupResult.subtitles) && backupResult.subtitles.length) {
-                          chapterObj.subtitles = backupResult.subtitles;
-                      }
-                      if (backupResult && Array.isArray(backupResult.audioTracks) && backupResult.audioTracks.length) {
-                          chapterObj.audioTracks = backupResult.audioTracks;
-                      }
-                  }
-              } catch (e) {
-                  // ignore backup errors per chapter
-              }
-          }
-
-          finalChapters.push(chapterObj);
-      }
-
-      if (finalChapters.length === 0) return jsonResponse({ error: "Video tidak tersedia." }, "ERR");
-
-      const localizedTitle = liveData.book?.bookName || liveData.book?.title || liveData.book?.bookName;
-      const localizedDesc = liveData.book?.introduction || liveData.book?.description || '';
-
-      const result = {
-          info: {
-              id: liveData.book.bookId,
-              title: localizedTitle,
-              cover: liveData.book.cover,
-              desc: localizedDesc,
-              tags: liveData.book.tags || [],
-              author: liveData.book.authorName || "Dramabox",
-              views: liveData.book.viewCount,
-              totalEps: finalChapters.length,
-              lang: lang
-          },
-          chapters: finalChapters,
-          related: (liveData.recommends || []).map(b => ({
-              id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount
-          }))
-      };
-
-      if (env.DRAMABOX_CACHE) context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
-
-      return jsonResponse(result, "SUCCESS");
-    }
-
-    return new Response("Invalid Request", { status: 400 });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
-  }
+async function importPrivateKey(pem) {
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/g, '').replace(/-----END PRIVATE KEY-----/g, '').replace(/\s+/g, '');
+  const der = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
+  return crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
 }
 
-// ------------------ Backup fetch helper (direct call to iddant.site/restAPI/) ------------------
-// Tries to call BACKUP_URL with { type: 'video', requestID: <id> }
-// and maps many possible response shapes into { sources: [{q,url}], subtitles: [{lang,url}], audioTracks: [{lang,url}] }
-async function fetchFromBackup(requestId, lang = 'id') {
-  if (!BACKUP_URL) return null;
-
-  const payload = { type: 'video', requestID: String(requestId) };
-
-  const headers = {
-    'Content-Type': 'application/json; charset=UTF-8',
-    'User-Agent': 'Cloudflare-Worker',
-    // include same headers used in your PHP wrapper so iddant.site accepts the request
-    'Authorization': `Bearer ${BACKUP_AUTH}`,
-    'X-License-Key': BACKUP_LICENSE
-  };
-
-  try {
-    const resp = await fetch(BACKUP_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
-    });
-
-    if (!resp.ok) return null;
-
-    const body = await resp.json().catch(() => null);
-    if (!body) return null;
-
-    // Candidate extraction helpers
-    const tryExtractFromDramaBoxShape = (obj) => {
-      const out = { sources: [], subtitles: [], audioTracks: [] };
-      const chapList = obj?.data?.chapterVoList || obj?.data?.chapterVo;
-      if (Array.isArray(chapList) && chapList.length) {
-        const entry = chapList.find(c => String(c.chapterId || c.id || c.chapter_id) === String(requestId)) || chapList[0];
-        if (entry) {
-          const cdn = entry.cdnList?.find(c => c.isDefault === 1) || entry.cdnList?.[0];
-          if (cdn && Array.isArray(cdn.videoPathList)) {
-            out.sources = cdn.videoPathList.map(v => ({ q: v.quality || v.q || 0, url: v.videoPath || v.url || v.path || v.src })).filter(s => s.url);
-          } else if (entry.mp4) {
-            out.sources = [{ q: 480, url: entry.mp4 }];
-          }
-          const candSubs = cdn?.subtitleList || cdn?.srtList || entry?.subtitleList || entry?.subtitles || entry?.srtList;
-          if (Array.isArray(candSubs)) {
-            out.subtitles = candSubs.map(s => (typeof s === 'string' ? { lang: 'und', url: s } : { lang: s.lang || s.language || 'und', url: s.url || s.path || s.srt || s.subtitlePath }));
-          }
-          const candAudio = cdn?.audioPathList || entry?.audioList || entry?.audios;
-          if (Array.isArray(candAudio)) {
-            out.audioTracks = candAudio.map(a => (typeof a === 'string' ? { lang: 'und', url: a } : { lang: a.lang || a.language || 'und', url: a.url || a.path || a.audioPath }));
-          }
-        }
-        return out;
-      }
-      return null;
-    };
-
-    // 1) Try drama-box-like structure
-    let mapped = tryExtractFromDramaBoxShape(body);
-    if (mapped && (mapped.sources.length || mapped.subtitles.length || mapped.audioTracks.length)) return mapped;
-
-    // 2) try nested shapes
-    mapped = tryExtractFromDramaBoxShape(body.json || body.result || body.data || {});
-    if (mapped && (mapped.sources.length || mapped.subtitles.length || mapped.audioTracks.length)) return mapped;
-
-    // 3) common shapes
-    if (body.url && typeof body.url === 'string') {
-      return { sources: [{ q: 480, url: body.url }], subtitles: [], audioTracks: [] };
-    }
-    if (Array.isArray(body.urls) && body.urls.length) {
-      return { sources: body.urls.map(u => ({ q: 480, url: u })), subtitles: [], audioTracks: [] };
-    }
-    if (body.video) {
-      if (Array.isArray(body.video.sources)) {
-        const srcs = body.video.sources.map(s => ({ q: s.q || s.quality || 0, url: s.url || s.path || s.src })).filter(s => s.url);
-        return { sources: srcs, subtitles: body.video.subtitles || [], audioTracks: body.video.audioTracks || [] };
-      }
-      if (body.video.url) return { sources: [{ q: 480, url: body.video.url }], subtitles: [], audioTracks: [] };
-    }
-
-    // 4) collect any nested http(s) urls (last resort)
-    const collectUrls = (obj, acc = []) => {
-      if (!obj || typeof obj !== 'object') return acc;
-      for (const k of Object.keys(obj)) {
-        const v = obj[k];
-        if (typeof v === 'string' && (v.startsWith('http://') || v.startsWith('https://'))) acc.push(v);
-        else if (Array.isArray(v)) v.forEach(i => { if (typeof i === 'string' && (i.startsWith('http://')||i.startsWith('https://'))) acc.push(i); else if (typeof i === 'object') collectUrls(i,acc); });
-        else if (typeof v === 'object') collectUrls(v, acc);
-      }
-      return acc;
-    };
-    const urls = collectUrls(body, []);
-    if (urls.length) {
-      const uniq = Array.from(new Set(urls));
-      return { sources: uniq.map(u => ({ q: 480, url: u })), subtitles: [], audioTracks: [] };
-    }
-
-    return null;
-  } catch (e) {
-    return null;
-  }
+async function createSignature(payload) {
+  const bodyJson = JSON.stringify(payload);
+  const toSignString = bodyJson + MANUAL_DEVICE_ID + MANUAL_ANDROID_ID + "Bearer " + MANUAL_TOKEN;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(toSignString);
+  const key = await importPrivateKey(PRIVATE_KEY_PEM);
+  const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
+  return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
 }
-
-// ------------------ Helper functions & fetchFromDramaBox ------------------
 
 async function fetchFromDramaBox(endpoint, payload, language = 'in') {
   const signature = await createSignature(payload);
@@ -435,28 +99,16 @@ async function fetchFromDramaBox(endpoint, payload, language = 'in') {
     "Current-Language": language,
     "Time-Zone": "+0700"
   };
-  const res = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
-    method: "POST", headers, body: JSON.stringify(payload)
+  const resp = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload)
   });
-  if (!res.ok) return {};
-  return await res.json();
-}
-
-async function createSignature(payload) {
-  const bodyJson = JSON.stringify(payload);
-  const toSignString = bodyJson + MANUAL_DEVICE_ID + MANUAL_ANDROID_ID + "Bearer " + MANUAL_TOKEN;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(toSignString);
-  const key = await importPrivateKey(PRIVATE_KEY_PEM);
-  const signatureBuffer = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, data);
-  return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-}
-
-function importPrivateKey(pem) {
-  const binaryDerString = atob(pem.replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\n/g, "").replace(/\s/g, ""));
-  const binaryDer = new Uint8Array(binaryDerString.length);
-  for (let i = 0; i < binaryDerString.length; i++) { binaryDer[i] = binaryDerString.charCodeAt(i); }
-  return crypto.subtle.importKey("pkcs8", binaryDer.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+  if (!resp.ok) {
+    console.log('fetchFromDramaBox failed', resp.status, await resp.text().catch(()=>null));
+    return {};
+  }
+  return await resp.json();
 }
 
 function jsonResponse(data, source) {
@@ -470,9 +122,10 @@ async function fetchSeriesDB(url) {
     const res = await fetch(url);
     if (res.ok) return await res.json();
     return [];
-  } catch { return []; }
+  } catch (e) {
+    return [];
+  }
 }
-
 function mapLocalBook(b) {
   return {
     id: b.source_id || b.id,
@@ -482,4 +135,235 @@ function mapLocalBook(b) {
     desc: b.description,
     tags: ["Series"]
   };
+}
+
+/* -------------------- Main Worker handler -------------------- */
+
+export async function onRequest(context) {
+  try {
+    const { request, env } = context;
+    const url = new URL(request.url);
+    const type = url.searchParams.get('type');
+    const bookId = url.searchParams.get('bookId');
+    const keyword = url.searchParams.get('keyword');
+    const reqLang = url.searchParams.get('lang');
+    const acceptLang = request.headers.get('Accept-Language') || '';
+    const lang = normalizeRequestedLang(reqLang, acceptLang);
+    const webficLang = (LANG_MAP[lang] && LANG_MAP[lang].webfic) || 'in';
+    const dramaLang = (LANG_MAP[lang] && LANG_MAP[lang].drama) || 'in';
+    const noCache = url.searchParams.get('nocache') === '1';
+
+    // --- SEARCH ---
+    if (type === 'search' && keyword) {
+      const SERIES_JSON_URL = `${url.origin}/series.json`;
+      const localData = await fetchSeriesDB(SERIES_JSON_URL);
+      const localResults = localData.filter(b => b.title.toLowerCase().includes(keyword.toLowerCase())).map(mapLocalBook);
+
+      const payload = { searchSource: "搜索按钮", pageNo: 1, pageSize: 20, from: "search_sug", keyword };
+      const rawData = await fetchFromDramaBox('/drama-box/search/search', payload, dramaLang);
+      const apiResults = (rawData.data?.searchList || []).map(item => ({
+        id: item.bookId || item.id,
+        title: item.bookName || item.title,
+        cover: item.cover || item.bookCover,
+        episodes: item.chapterCount || '?',
+        desc: item.introduction || 'Hasil pencarian',
+        tags: item.tags || []
+      }));
+
+      const combined = [...localResults, ...apiResults];
+      const unique = combined.filter((v,i,a) => a.findIndex(t => (t.id === v.id)) === i);
+      return jsonResponse({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, 'SEARCH');
+    }
+
+    // --- LIST ---
+    if (type === 'list') {
+      const SERIES_JSON_URL = `${url.origin}/series.json`;
+      const localData = await fetchSeriesDB(SERIES_JSON_URL);
+      const combinedSections = [];
+      if (localData.length > 0) {
+        combinedSections.push({ title: "🔥 Pilihan Editor", books: localData.slice(0,15).map(mapLocalBook) });
+        if (localData.length > 15) combinedSections.push({ title: "📺 Rekomendasi Spesial", books: localData.slice(15,35).map(mapLocalBook) });
+        if (localData.length > 35) combinedSections.push({ title: "✨ Koleksi Populer", books: localData.slice(35,100).map(mapLocalBook) });
+      }
+      return jsonResponse({ sections: combinedSections }, 'LIST');
+    }
+
+    // --- CHAPTER / DETAIL (MAIN) ---
+    if (type === 'chapter' && bookId) {
+      const cacheKey = `unlock_v10_${bookId}_lang_${lang}`;
+
+      // KV cache read with age check and nocache support
+      if (env.DRAMABOX_CACHE && !noCache) {
+        try {
+          const cachedRaw = await env.DRAMABOX_CACHE.get(cacheKey);
+          if (cachedRaw) {
+            const cachedObj = JSON.parse(cachedRaw);
+            const cachedAt = cachedObj._cachedAt || 0;
+            const age = Date.now() - cachedAt;
+            if (age < CACHE_MAX_AGE_MS) {
+              console.log(`Returning KV cache for ${cacheKey}, age=${Math.round(age/1000)}s`);
+              return new Response(JSON.stringify({ ...cachedObj, _source: 'CACHE' }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+            } else {
+              console.log(`Cache expired for ${cacheKey}, age=${Math.round(age/1000)}s; fetching fresh.`);
+            }
+          }
+        } catch (e) {
+          console.log('KV cache read/parse error', e);
+        }
+      }
+
+      // 1. metadata from webfic
+      const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${encodeURIComponent(bookId)}&tlanguage=${encodeURIComponent(webficLang)}`);
+      if (!webficRes.ok) {
+        console.log('Webfic fetch failed', webficRes.status);
+        return jsonResponse({ error: 'Gagal mengambil data drama' }, 'ERR');
+      }
+      const webficJson = await webficRes.json();
+      const liveData = webficJson.data || {};
+      const liveChapterList = liveData.chapterList || [];
+      if (!Array.isArray(liveChapterList) || liveChapterList.length === 0) {
+        return jsonResponse({ error: 'Chapter tidak ditemukan' }, 'ERR');
+      }
+
+      // 2. Unlock (batch) - chunked
+      const chapterIds = liveChapterList.map(c => c.id).filter(Boolean);
+      const videoMap = {}; // key -> { sources, subtitles, audioTracks }
+
+      for (let i = 0; i < chapterIds.length; i += CHUNK_SIZE) {
+        const chunk = chapterIds.slice(i, i + CHUNK_SIZE);
+        try {
+          const payload = { bookId: bookId, chapterIdList: chunk };
+          const unlock = await fetchFromDramaBox('/drama-box/chapterv2/batchDownload', payload, dramaLang);
+          if (unlock && unlock.data && Array.isArray(unlock.data.chapterVoList)) {
+            for (const entry of unlock.data.chapterVoList) {
+              const keys = [];
+              if (entry.chapterId !== undefined && entry.chapterId !== null) keys.push(entry.chapterId);
+              if (entry.chapter_id !== undefined && entry.chapter_id !== null) keys.push(entry.chapter_id);
+              if (entry.id !== undefined && entry.id !== null) keys.push(entry.id);
+
+              const cdn = entry.cdnList?.find(c => c.isDefault === 1) || entry.cdnList?.[0];
+              let sourcesArr = [];
+              if (cdn && Array.isArray(cdn.videoPathList) && cdn.videoPathList.length) {
+                sourcesArr = cdn.videoPathList.map(v => ({
+                  q: v.quality || (v.q ? Number(v.q) : 0),
+                  url: v.videoPath || v.url || v.path || v.src,
+                  lang: v.language || v.lang || null,
+                  type: v.type || null
+                })).filter(s => s.url).sort((a,b) => (b.q||0)-(a.q||0));
+              }
+              // subtitles/audio extraction (best-effort)
+              let subtitles = [];
+              const candidateSubLists = [ cdn?.subtitleList, cdn?.srtList, entry?.subtitleList, entry?.subtitles, entry?.srtList, entry?.sub ];
+              for (const s of candidateSubLists) {
+                if (!s) continue;
+                if (Array.isArray(s) && s.length) {
+                  s.forEach(it => {
+                    if (!it) return;
+                    if (typeof it === 'string') subtitles.push({ lang: 'und', url: it });
+                    else {
+                      const urlCandidate = it.url || it.path || it.srt || it.subtitlePath || it.uri;
+                      const langCandidate = it.lang || it.language || it.code || it.label || 'und';
+                      if (urlCandidate) subtitles.push({ lang: langCandidate, url: urlCandidate });
+                    }
+                  });
+                  break;
+                }
+              }
+              let audioTracks = [];
+              const candidateAudioLists = [ cdn?.audioPathList, entry?.audioList, entry?.audios, cdn?.audioList ];
+              for (const a of candidateAudioLists) {
+                if (!a) continue;
+                if (Array.isArray(a) && a.length) {
+                  a.forEach(it => {
+                    if (!it) return;
+                    if (typeof it === 'string') audioTracks.push({ lang: 'und', url: it });
+                    else {
+                      const urlCandidate = it.url || it.path || it.audioPath || it.uri;
+                      const langCandidate = it.lang || it.language || it.code || it.label || 'und';
+                      if (urlCandidate) audioTracks.push({ lang: langCandidate, url: urlCandidate });
+                    }
+                  });
+                  break;
+                }
+              }
+
+              if (keys.length) {
+                for (const k of keys) {
+                  if (k === undefined || k === null) continue;
+                  videoMap[String(k)] = { sources: sourcesArr || [], subtitles: subtitles || [], audioTracks: audioTracks || [] };
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.log('batchDownload chunk failed', e?.message || e);
+          // continue with other chunks; we'll fallback to mp4 if present or leave empty
+        }
+      }
+
+      // 3. build finalChapters
+      const finalChapters = [];
+      for (const chItem of liveChapterList) {
+        const keyCandidates = [chItem.id, chItem.chapterId, chItem.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
+        let mapped = null;
+        for (const k of keyCandidates) { if (!k) continue; if (videoMap[k]) { mapped = videoMap[k]; break; } }
+
+        const chapterObj = {
+          index: chItem.index,
+          title: chItem.name || chItem.chapterName || `Episode ${chItem.index}`,
+          sources: [],
+          subtitles: [],
+          audioTracks: []
+        };
+
+        if (mapped) {
+          if (Array.isArray(mapped.sources) && mapped.sources.length) chapterObj.sources = mapped.sources;
+          if (Array.isArray(mapped.subtitles) && mapped.subtitles.length) chapterObj.subtitles = mapped.subtitles;
+          if (Array.isArray(mapped.audioTracks) && mapped.audioTracks.length) chapterObj.audioTracks = mapped.audioTracks;
+        }
+
+        // fallback to ch.mp4
+        if ((!chapterObj.sources || chapterObj.sources.length === 0) && chItem.mp4) {
+          chapterObj.sources = [{ q: 480, url: chItem.mp4 }];
+        }
+
+        finalChapters.push(chapterObj);
+      }
+
+      if (finalChapters.length === 0) return jsonResponse({ error: 'Video tidak tersedia.' }, 'ERR');
+
+      const result = {
+        info: {
+          id: liveData.book?.bookId,
+          title: liveData.book?.bookName,
+          cover: liveData.book?.cover,
+          desc: liveData.book?.introduction,
+          tags: liveData.book?.tags || [],
+          author: liveData.book?.authorName || 'Dramabox',
+          views: liveData.book?.viewCount,
+          totalEps: finalChapters.length,
+          lang
+        },
+        chapters: finalChapters,
+        related: (liveData.recommends || []).map(b => ({ id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount }))
+      };
+
+      // store to KV with timestamp for age-based invalidation
+      if (env.DRAMABOX_CACHE) {
+        try {
+          const payloadToStore = { ...result, _cachedAt: Date.now() };
+          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(payloadToStore), { expirationTtl: 1800 }));
+        } catch (e) {
+          console.log('KV put failed', e);
+        }
+      }
+
+      return jsonResponse(result, 'SUCCESS');
+    }
+
+    return new Response('Invalid Request', { status: 400 });
+  } catch (err) {
+    console.log('Unhandled error in onRequest', err);
+    return new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  }
 }
