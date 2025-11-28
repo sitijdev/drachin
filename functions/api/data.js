@@ -1,17 +1,16 @@
-// Cloudflare Worker - data API with KV-backed sessions
-// - Single source: Webfic (metadata) + SAPI Dramabox (batchDownload)
-// - KV namespaces required: DRAMABOX_CACHE, SESSIONS (bind in Pages/Wrangler)
-// - Session stored server-side in SESSIONS KV; cookie set once per new visitor
-// - If cached chapters contain any sources: [], the cache is ignored and fresh fetch is performed
-// - Query params:
-//     nocache=1    -> force fresh fetch (bypass cache)
-//     lang=<code>  -> preferred language (id,en,ms,zh,es)
-// - Response includes header X-Cache-Status: HIT | MISS | FORCED | BYPASS
-//
-// NOTE: This file includes development hardcoded credentials. For production move secrets to worker secrets.
-//
-// Save as: functions/api/data.js
+// Cloudflare Worker - Dramabox API with Auto-Refresh Token & KV Session
+// Requires KV namespaces: DRAMABOX_CACHE, SESSIONS
+
 /* eslint-env serviceworker */
+
+// --- KONFIGURASI STATIS (Device ID Tetap agar terlihat seperti HP yang sama) ---
+const CONST_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
+const CONST_ANDROID_ID = "ffffffff9b5bfe16000000000";
+const CONST_PACKAGE = "com.storymatrix.drama";
+const CONST_APP_VER = "451";
+const CONST_VN_VER = "4.5.1";
+
+// Private Key untuk RSA Signature (Jangan diubah jika masih match dengan APK)
 const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC9Q4Y5QX5j08Hr
 nbY3irfKdkEllAU2OORnAjlXDyCzcm2Z6ZRrGvtTZUAMelfU5PWS6XGEm3d4kJEK
@@ -41,13 +40,6 @@ A/tpGr378fcUT7WGBgTmBRaAnv1P1n/Tp0TSvh5XpIhhMuxcitIgrhYMIG3GbP9J
 NAarxO/qPW6Gi0xWaF7il7Or
 -----END PRIVATE KEY-----`;
 
-const MANUAL_TOKEN = "UmYxRVlxSHJrTnE4Y05SeGdqZDYrYXhzdjFTL3QxZ3FDQ2ljSy9COUlUL0tEUThobW91N21yanloWSt4WWtlSng4V2I3bFlONXU4bkc2c3dwNFAxbzJDemFyZE10WlNCczVsc0pDdDh6VTZ6SVdKY1B3dVhNUGZweitYK3NwcUci";
-const MANUAL_DEVICE_ID = "ee9d23ac-0596-4f3e-8279-b652c9c2b7f0";
-const MANUAL_ANDROID_ID = "ffffffff9b5bfe16000000000";
-const MANUAL_USER_ID = "336084056";
-const FAKE_APP_VERSION = "451";
-const FAKE_VN_VERSION = "4.5.1";
-
 const LANG_MAP = {
   id: { webfic: 'in', drama: 'in' },
   en: { webfic: 'en', drama: 'en' },
@@ -56,12 +48,173 @@ const LANG_MAP = {
   es: { webfic: 'es', drama: 'es' }
 };
 
-const CACHE_MAX_AGE_MS = 1000 * 60 * 30; // 30 minutes
-const CHUNK_SIZE = 60; // chunking for batchDownload
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days session TTL
+const CACHE_MAX_AGE_MS = 1000 * 60 * 30; // 30 mins
+const CHUNK_SIZE = 60; 
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; 
 
-/* -------------------- Session helpers (KV-backed) -------------------- */
-// Requires KV binding: env.SESSIONS
+// --- TOKEN MANAGEMENT ---
+
+/**
+ * Mengambil token aktif dari KV. Jika tidak ada, panggil bootstrap.
+ */
+async function getActiveToken(env) {
+    if (!env.DRAMABOX_CACHE) {
+        // Fallback jika KV tidak terikat (untuk dev)
+        return await fetchBootstrapToken(); 
+    }
+    
+    // Coba baca dari KV
+    let tokenData = await env.DRAMABOX_CACHE.get("SYSTEM_TOKEN", { type: "json" });
+    if (tokenData && tokenData.token) {
+        return tokenData.token;
+    }
+
+    // Jika kosong, generate baru
+    return await refreshAndStoreToken(env);
+}
+
+/**
+ * Hit Endpoint Bootstrap untuk dapat token baru
+ */
+async function fetchBootstrapToken() {
+    const url = "https://sapi.dramaboxdb.com/drama-box/ap001/bootstrap?timestamp=" + Date.now();
+    const payload = { 'distinctId': "cc85be1f8166bd67" }; // Bisa dirandomize jika perlu
+    
+    const headers = {
+        'Host': "sapi.dramaboxdb.com",
+        'Version': CONST_APP_VER,
+        'Cid': "DAUAG1050213",
+        'Package-Name': CONST_PACKAGE,
+        'Apn': '2',
+        'Device-Id': CONST_DEVICE_ID,
+        'Android-Id': CONST_ANDROID_ID,
+        'Language': 'en',
+        'Content-Type': "application/json; charset=UTF-8",
+        'User-Agent': "okhttp/4.10.0"
+    };
+
+    try {
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload)
+        });
+        
+        const json = await resp.json();
+        if (json.data && json.data.user && json.data.user.token) {
+            console.log("New Token Generated:", json.data.user.token.substring(0, 10) + "...");
+            return json.data.user.token;
+        }
+        throw new Error("Bootstrap response missing token");
+    } catch (e) {
+        console.error("Bootstrap failed:", e);
+        throw e;
+    }
+}
+
+/**
+ * Generate token baru dan simpan di KV
+ */
+async function refreshAndStoreToken(env) {
+    const newToken = await fetchBootstrapToken();
+    if (env.DRAMABOX_CACHE && newToken) {
+        await env.DRAMABOX_CACHE.put("SYSTEM_TOKEN", JSON.stringify({ 
+            token: newToken, 
+            updatedAt: Date.now() 
+        }), { expirationTtl: 86400 }); // Cache 24 jam
+    }
+    return newToken;
+}
+
+// --- CRYPTO & SIGNATURE ---
+
+async function importPrivateKey(pem) {
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/g, '').replace(/-----END PRIVATE KEY-----/g, '').replace(/\s+/g, '');
+  const binaryString = atob(b64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return crypto.subtle.importKey(
+    'pkcs8',
+    bytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+}
+
+// Signature sekarang butuh Token sebagai parameter!
+async function createSignature(payload, token) {
+  const bodyJson = JSON.stringify(payload);
+  const toSignString = bodyJson + CONST_DEVICE_ID + CONST_ANDROID_ID + "Bearer " + token;
+  
+  const encoder = new TextEncoder();
+  const data = encoder.encode(toSignString);
+  const key = await importPrivateKey(PRIVATE_KEY_PEM);
+  const signatureBuffer = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, data);
+  
+  let binary = '';
+  const bytes = new Uint8Array(signatureBuffer);
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// --- FETCH WRAPPER WITH RETRY ---
+
+async function fetchFromDramaBox(env, endpoint, payload, language = 'in') {
+    // 1. Ambil token (dari KV atau generate baru)
+    let token = await getActiveToken(env);
+    
+    // Fungsi internal untuk melakukan request
+    const doFetch = async (currentToken) => {
+        const signature = await createSignature(payload, currentToken);
+        const headers = {
+            'Host': 'sapi.dramaboxdb.com',
+            'Tn': `Bearer ${currentToken}`,
+            'Version': CONST_APP_VER,
+            'Vn': CONST_VN_VER,
+            'Package-Name': CONST_PACKAGE,
+            'Device-Id': CONST_DEVICE_ID,
+            // Userid bisa dinamis dari bootstrap jika perlu, tapi seringkali opsional untuk baca
+            'Userid': "0", 
+            'Android-Id': CONST_ANDROID_ID,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'User-Agent': 'okhttp/4.10.0',
+            'sn': signature,
+            'Language': language
+        };
+
+        return await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+    };
+
+    // 2. Coba Request Pertama
+    let resp = await doFetch(token);
+
+    // 3. Cek Error 401/403 (Token Expired/Invalid)
+    if (resp.status === 401 || resp.status === 403) {
+        console.warn("Token expired/invalid (401/403). Refreshing token...");
+        
+        // 4. Paksa Refresh Token
+        token = await refreshAndStoreToken(env);
+        
+        // 5. Retry Request dengan Token Baru
+        resp = await doFetch(token);
+    }
+
+    if (!resp.ok) {
+        console.log(`Fetch DB Failed [${endpoint}]:`, resp.status);
+        return {}; // Return kosong agar tidak crash
+    }
+
+    return await resp.json();
+}
+
+// --- SESSION HELPERS ---
 
 function parseCookies(cookieHeader) {
   const out = {};
@@ -74,44 +227,33 @@ function parseCookies(cookieHeader) {
   return out;
 }
 
-function makeSetCookieHeader(sessionId, maxAge = SESSION_TTL_SECONDS) {
-  // HttpOnly, Secure, SameSite=Lax
-  return `session_id=${encodeURIComponent(sessionId)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+function makeSetCookieHeader(sessionId) {
+  return `session_id=${encodeURIComponent(sessionId)}; Max-Age=${SESSION_TTL_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
 
 async function loadSession(env, cookieHeader) {
   const cookies = parseCookies(cookieHeader);
   let sessionId = cookies['session_id'];
-  if (!sessionId) {
-    // create new
-    sessionId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
-    const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
+  
+  const createNew = async () => {
+    const newId = crypto.randomUUID();
+    const newSession = { createdAt: Date.now(), updatedAt: Date.now() };
     if (env.SESSIONS) {
-      await env.SESSIONS.put(`s:${sessionId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
-    }
-    return { id: sessionId, data: newSession, setCookie: makeSetCookieHeader(sessionId) };
-  } else {
-    if (!env.SESSIONS) {
-      // No KV bound; return ephemeral session object without persistence
-      return { id: sessionId, data: { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null }, setCookie: null };
-    }
-    const raw = await env.SESSIONS.get(`s:${sessionId}`);
-    if (!raw) {
-      const newId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
-      const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
       await env.SESSIONS.put(`s:${newId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
-      return { id: newId, data: newSession, setCookie: makeSetCookieHeader(newId) };
     }
-    try {
-      const data = JSON.parse(raw);
-      return { id: sessionId, data, setCookie: null };
-    } catch (e) {
-      const newId = crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).slice(2) + Date.now());
-      const newSession = { createdAt: Date.now(), updatedAt: Date.now(), prefs: {}, cacheBypass: {}, lastViewed: null };
-      await env.SESSIONS.put(`s:${newId}`, JSON.stringify(newSession), { expirationTtl: SESSION_TTL_SECONDS });
-      return { id: newId, data: newSession, setCookie: makeSetCookieHeader(newId) };
-    }
-  }
+    return { id: newId, data: newSession, setCookie: makeSetCookieHeader(newId) };
+  };
+
+  if (!sessionId) return await createNew();
+  
+  if (!env.SESSIONS) return { id: sessionId, data: {}, setCookie: null };
+  
+  const raw = await env.SESSIONS.get(`s:${sessionId}`);
+  if (!raw) return await createNew();
+  
+  try {
+      return { id: sessionId, data: JSON.parse(raw), setCookie: null };
+  } catch { return await createNew(); }
 }
 
 async function storeSession(env, sessionId, sessionData) {
@@ -120,63 +262,37 @@ async function storeSession(env, sessionId, sessionData) {
   await env.SESSIONS.put(`s:${sessionId}`, JSON.stringify(sessionData), { expirationTtl: SESSION_TTL_SECONDS });
 }
 
-/* -------------------- Crypto / Dramabox helpers -------------------- */
+// --- API HELPERS ---
 
-async function importPrivateKey(pem) {
-  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----/g, '').replace(/-----END PRIVATE KEY-----/g, '').replace(/\s+/g, '');
-  const der = Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
-  return crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+async function fetchSeriesDB(url) {
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.json() : [];
+  } catch { return []; }
 }
 
-async function createSignature(payload) {
-  const bodyJson = JSON.stringify(payload);
-  const toSignString = bodyJson + MANUAL_DEVICE_ID + MANUAL_ANDROID_ID + "Bearer " + MANUAL_TOKEN;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(toSignString);
-  const key = await importPrivateKey(PRIVATE_KEY_PEM);
-  const signatureBuffer = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, data);
-  return btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-}
-
-async function fetchFromDramaBox(endpoint, payload, language = 'in') {
-  const signature = await createSignature(payload);
-  const headers = {
-    'Host': 'sapi.dramaboxdb.com',
-    'Tn': `Bearer ${MANUAL_TOKEN}`,
-    'Version': FAKE_APP_VERSION,
-    'Vn': FAKE_VN_VERSION,
-    'Package-Name': 'com.storymatrix.drama',
-    'Device-Id': MANUAL_DEVICE_ID,
-    'Userid': MANUAL_USER_ID,
-    'Android-Id': MANUAL_ANDROID_ID,
-    'Content-Type': 'application/json; charset=UTF-8',
-    'User-Agent': 'okhttp/4.10.0',
-    'sn': signature,
-    'Language': language,
-    'Current-Language': language,
-    'Time-Zone': '+0700'
+function mapLocalBook(b) {
+  return {
+    id: b.source_id || b.id,
+    title: b.title,
+    cover: b.cover_path || b.cover,
+    episodes: b.total_episodes || 'Full',
+    desc: b.description,
+    tags: b.tags || ['Series']
   };
-  const resp = await fetch(`https://sapi.dramaboxdb.com${endpoint}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(()=>null);
-    console.log('fetchFromDramaBox failed', resp.status, text);
-    return {};
-  }
-  return await resp.json();
 }
-
-/* -------------------- Utility helpers -------------------- */
 
 function jsonResponseWithHeaders(data, source, extraHeaders = {}) {
-  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': source, ...extraHeaders };
+  const headers = { 
+    'Content-Type': 'application/json', 
+    'Access-Control-Allow-Origin': '*', 
+    'X-Cache-Status': source, 
+    ...extraHeaders 
+  };
   return new Response(JSON.stringify({ ...data, _source: source }), { headers });
 }
 
-/* -------------------- Main Worker handler -------------------- */
+// --- MAIN HANDLER ---
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -185,281 +301,124 @@ export async function onRequest(context) {
     const type = url.searchParams.get('type');
     const bookId = url.searchParams.get('bookId');
     const keyword = url.searchParams.get('keyword');
-    const reqLang = url.searchParams.get('lang');
-    const acceptLang = request.headers.get('Accept-Language') || '';
-    const lang = (function normalizeRequestedLang(reqLangInner, acceptHeader) {
-      if (reqLangInner && typeof reqLangInner === 'string') {
-        const l = reqLangInner.toLowerCase().split(/[_-]/)[0];
-        if (LANG_MAP[l]) return l;
-      }
-      if (acceptHeader) {
-        const first = acceptHeader.split(',')[0].split(';')[0].trim().toLowerCase();
-        const l = first.split(/[_-]/)[0];
-        if (LANG_MAP[l]) return l;
-      }
-      return 'id';
-    })(reqLang, acceptLang);
-    const webficLang = (LANG_MAP[lang] && LANG_MAP[lang].webfic) || 'in';
-    const dramaLang = (LANG_MAP[lang] && LANG_MAP[lang].drama) || 'in';
+    const reqLang = url.searchParams.get('lang') || 'id';
+    
+    // Simple lang normalizer
+    const langKey = reqLang.toLowerCase().startsWith('en') ? 'en' : 'id';
+    const webficLang = LANG_MAP[langKey].webfic;
+    const dramaLang = LANG_MAP[langKey].drama;
     const noCache = url.searchParams.get('nocache') === '1';
 
-    // load session (may create and setCookie)
+    // Session Load
     const cookieHeader = request.headers.get('Cookie') || '';
     const session = await loadSession(env, cookieHeader);
-    // session: { id, data, setCookie }
 
-    // SEARCH
+    // 1. SEARCH
     if (type === 'search' && keyword) {
-      const SERIES_JSON_URL = `${url.origin}/series.json`;
-      const localData = await (async u => { try { const r = await fetch(u); if (r.ok) return await r.json(); return []; } catch { return []; } })(SERIES_JSON_URL);
-      const localResults = (localData || []).filter(b => String(b.title || '').toLowerCase().includes(keyword.toLowerCase())).map(b => ({ id: b.source_id||b.id, title: b.title, cover: b.cover_path, episodes: 'Full', desc: b.description, tags: ['Series'] }));
-
       const payload = { searchSource: '搜索按钮', pageNo: 1, pageSize: 20, from: 'search_sug', keyword };
-      const rawData = await fetchFromDramaBox('/drama-box/search/search', payload, dramaLang);
+      // Panggil fetch wrapper baru (passing 'env')
+      const rawData = await fetchFromDramaBox(env, '/drama-box/search/search', payload, dramaLang);
+      
       const apiResults = (rawData.data?.searchList || []).map(item => ({
         id: item.bookId || item.id,
         title: item.bookName || item.title,
         cover: item.cover || item.bookCover,
-        episodes: item.chapterCount || '?',
-        desc: item.introduction || 'Hasil pencarian',
-        tags: item.tags || []
+        episodes: item.chapterCount
       }));
 
-      const combined = [...localResults, ...apiResults];
-      const unique = combined.filter((v,i,a) => a.findIndex(t => t.id === v.id) === i);
-      const res = jsonResponseWithHeaders({ sections: [{ title: `Hasil: "${keyword}"`, books: unique }] }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
-      if (session.setCookie) await storeSession(env, session.id, session.data);
-      return res;
+      return jsonResponseWithHeaders({ results: apiResults }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
     }
 
-    // LIST
+    // 2. LIST
     if (type === 'list') {
-      const SERIES_JSON_URL = `${url.origin}/series.json`;
-      const localData = await fetchSeriesDB(SERIES_JSON_URL);
-      const combinedSections = [];
-      if (localData.length > 0) {
-        combinedSections.push({ title: '🔥 Pilihan Editor', books: localData.slice(0,15).map(mapLocalBook) });
-        if (localData.length > 15) combinedSections.push({ title: '📺 Rekomendasi Spesial', books: localData.slice(15,35).map(mapLocalBook) });
-        if (localData.length > 35) combinedSections.push({ title: '✨ Koleksi Populer', books: localData.slice(35,100).map(mapLocalBook) });
-      }
-      const res = jsonResponseWithHeaders({ sections: combinedSections }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
-      if (session.setCookie) await storeSession(env, session.id, session.data);
-      return res;
+      const localData = await fetchSeriesDB(`${url.origin}/series.json`);
+      return jsonResponseWithHeaders({ 
+          sections: [{ title: 'Popular', books: localData.slice(0,20).map(mapLocalBook) }] 
+      }, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
     }
 
-    // CHAPTER / DETAIL (MAIN)
+    // 3. CHAPTER / DETAIL
     if (type === 'chapter' && bookId) {
-      const cacheKey = `unlock_v10_${bookId}_lang_${lang}`;
-
-      // KV cache read with age check and nocache support.
-      // If cached exists but any chapter.sources === [], we must force a fresh fetch.
-      let cacheStatus = 'MISS';
-      let cachedObj = null;
+      const cacheKey = `v11_${bookId}_${langKey}`;
+      
+      // Cache Logic (Read)
       if (env.DRAMABOX_CACHE && !noCache) {
-        try {
           const cachedRaw = await env.DRAMABOX_CACHE.get(cacheKey);
           if (cachedRaw) {
-            const parsed = JSON.parse(cachedRaw);
-            const cachedAt = parsed._cachedAt || 0;
-            const age = Date.now() - cachedAt;
-            const chaptersArr = Array.isArray(parsed.chapters) ? parsed.chapters : [];
-            const hasEmptySources = chaptersArr.some(ch => !Array.isArray(ch.sources) || ch.sources.length === 0);
-            if (hasEmptySources) {
-              // Rule: if any chapter has empty sources, bypass cache and fetch fresh
-              console.log(`Cache contains empty sources for ${cacheKey}; forcing refresh from server.`);
-              cacheStatus = 'FORCED';
-            } else if (age < CACHE_MAX_AGE_MS) {
-              cacheStatus = 'HIT';
-              cachedObj = parsed;
-            } else {
-              console.log(`Cache expired for ${cacheKey}, age=${Math.round(age/1000)}s; fetching fresh.`);
-              cacheStatus = 'MISS';
-            }
+              const parsed = JSON.parse(cachedRaw);
+              const hasEmpty = parsed.chapters.some(c => !c.sources || !c.sources.length);
+              if (!hasEmpty) {
+                  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': 'HIT' };
+                  if (session.setCookie) headers['Set-Cookie'] = session.setCookie;
+                  return new Response(JSON.stringify(parsed), { headers });
+              }
           }
-        } catch (e) {
-          console.log('KV cache read/parse error', e);
-          cacheStatus = 'MISS';
-        }
-      } else if (noCache) {
-        cacheStatus = 'BYPASS';
       }
 
-      if (cachedObj) {
-        // Return cached response but attach session cookie if created
-        const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': cacheStatus };
-        if (session.setCookie) headers['Set-Cookie'] = session.setCookie;
-        if (session.data) session.data.lastViewed = { bookId, timestamp: Date.now() };
-        if (session.setCookie) await storeSession(env, session.id, session.data);
-        return new Response(JSON.stringify({ ...cachedObj, _source: 'CACHE' }), { headers });
+      // Webfic Metadata
+      const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${bookId}&tlanguage=${webficLang}`);
+      const webficJson = await webficRes.ok ? await webficRes.json() : {};
+      const liveChapterList = webficJson.data?.chapterList || [];
+
+      if (!liveChapterList.length) {
+          return jsonResponseWithHeaders({ error: 'Not Found' }, 'ERR');
       }
 
-      // Proceed to fetch fresh data from Webfic + Dramabox
-      // 1. Webfic metadata
-      const webficRes = await fetch(`https://www.webfic.com/webfic/book/detail/v2?id=${encodeURIComponent(bookId)}&tlanguage=${encodeURIComponent(webficLang)}`);
-      if (!webficRes.ok) {
-        console.log('Webfic fetch failed', webficRes.status);
-        return jsonResponseWithHeaders({ error: 'Gagal mengambil data drama' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
-      }
-      const webficJson = await webficRes.json();
-      const liveData = webficJson.data || {};
-      const liveChapterList = liveData.chapterList || [];
-      if (!Array.isArray(liveChapterList) || liveChapterList.length === 0) {
-        return jsonResponseWithHeaders({ error: 'Chapter tidak ditemukan' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
-      }
-
-      // 2. Unlock batchDownload in chunks
+      // Batch Download Logic
       const chapterIds = liveChapterList.map(c => c.id).filter(Boolean);
       const videoMap = {};
+
       for (let i = 0; i < chapterIds.length; i += CHUNK_SIZE) {
         const chunk = chapterIds.slice(i, i + CHUNK_SIZE);
         try {
           const payload = { bookId: bookId, chapterIdList: chunk };
-          const unlock = await fetchFromDramaBox('/drama-box/chapterv2/batchDownload', payload, dramaLang);
-          if (unlock && unlock.data && Array.isArray(unlock.data.chapterVoList)) {
-            for (const entry of unlock.data.chapterVoList) {
-              const keys = [];
-              if (entry.chapterId !== undefined && entry.chapterId !== null) keys.push(entry.chapterId);
-              if (entry.chapter_id !== undefined && entry.chapter_id !== null) keys.push(entry.chapter_id);
-              if (entry.id !== undefined && entry.id !== null) keys.push(entry.id);
+          // Panggil fetch wrapper baru (passing 'env') untuk auto-refresh token
+          const unlock = await fetchFromDramaBox(env, '/drama-box/chapterv2/batchDownload', payload, dramaLang);
 
-              const cdn = entry.cdnList?.find(c => c.isDefault === 1) || entry.cdnList?.[0];
-              let sourcesArr = [];
-              if (cdn && Array.isArray(cdn.videoPathList) && cdn.videoPathList.length) {
-                sourcesArr = cdn.videoPathList.map(v => ({
-                  q: v.quality || (v.q ? Number(v.q) : 0),
-                  url: v.videoPath || v.url || v.path || v.src,
-                  lang: v.language || v.lang || null,
-                  type: v.type || null
-                })).filter(s => s.url).sort((a,b) => (b.q||0)-(a.q||0));
-              }
-
-              // subtitles/audio extraction (best-effort)
-              let subtitles = [];
-              const candidateSubLists = [ cdn?.subtitleList, cdn?.srtList, entry?.subtitleList, entry?.subtitles, entry?.srtList, entry?.sub ];
-              for (const s of candidateSubLists) {
-                if (!s) continue;
-                if (Array.isArray(s) && s.length) {
-                  s.forEach(it => {
-                    if (!it) return;
-                    if (typeof it === 'string') subtitles.push({ lang: 'und', url: it });
-                    else {
-                      const urlCandidate = it.url || it.path || it.srt || it.subtitlePath || it.uri;
-                      const langCandidate = it.lang || it.language || it.code || it.label || 'und';
-                      if (urlCandidate) subtitles.push({ lang: langCandidate, url: urlCandidate });
-                    }
-                  });
-                  break;
+          if (unlock?.data?.chapterVoList) {
+             unlock.data.chapterVoList.forEach(entry => {
+                const cdn = entry.cdnList?.find(c => c.isDefault === 1) || entry.cdnList?.[0];
+                if (cdn?.videoPathList) {
+                    const sources = cdn.videoPathList
+                        .map(v => ({ q: Number(v.q || 0), url: v.videoPath || v.url }))
+                        .sort((a,b) => b.q - a.q);
+                    
+                    if (entry.chapterId) videoMap[String(entry.chapterId)] = sources;
+                    if (entry.id) videoMap[String(entry.id)] = sources;
                 }
-              }
-
-              let audioTracks = [];
-              const candidateAudioLists = [ cdn?.audioPathList, entry?.audioList, entry?.audios, cdn?.audioList ];
-              for (const a of candidateAudioLists) {
-                if (!a) continue;
-                if (Array.isArray(a) && a.length) {
-                  a.forEach(it => {
-                    if (!it) return;
-                    if (typeof it === 'string') audioTracks.push({ lang: 'und', url: it });
-                    else {
-                      const urlCandidate = it.url || it.path || it.audioPath || it.uri;
-                      const langCandidate = it.lang || it.language || it.code || it.label || 'und';
-                      if (urlCandidate) audioTracks.push({ lang: langCandidate, url: urlCandidate });
-                    }
-                  });
-                  break;
-                }
-              }
-
-              if (keys.length) {
-                for (const k of keys) {
-                  if (k === undefined || k === null) continue;
-                  videoMap[String(k)] = { sources: sourcesArr || [], subtitles: subtitles || [], audioTracks: audioTracks || [] };
-                }
-              }
-            }
+             });
           }
-        } catch (e) {
-          console.log('batchDownload chunk failed', e?.message || e);
-          // continue other chunks
-        }
+        } catch (e) { console.error("Chunk Error", e); }
       }
 
-      // 3. Build finalChapters from liveChapterList + videoMap
-      const finalChapters = [];
-      for (const chItem of liveChapterList) {
-        const keyCandidates = [chItem.id, chItem.chapterId, chItem.chapter_id].map(k => (k === undefined || k === null) ? null : String(k));
-        let mapped = null;
-        for (const k of keyCandidates) { if (!k) continue; if (videoMap[k]) { mapped = videoMap[k]; break; } }
-
-        const chapterObj = {
-          index: chItem.index,
-          title: chItem.name || chItem.chapterName || `Episode ${chItem.index}`,
-          sources: [],
-          subtitles: [],
-          audioTracks: []
-        };
-
-        if (mapped) {
-          if (Array.isArray(mapped.sources) && mapped.sources.length) chapterObj.sources = mapped.sources;
-          if (Array.isArray(mapped.subtitles) && mapped.subtitles.length) chapterObj.subtitles = mapped.subtitles;
-          if (Array.isArray(mapped.audioTracks) && mapped.audioTracks.length) chapterObj.audioTracks = mapped.audioTracks;
-        }
-
-        if ((!chapterObj.sources || chapterObj.sources.length === 0) && chItem.mp4) {
-          chapterObj.sources = [{ q: 480, url: chItem.mp4 }];
-        }
-
-        finalChapters.push(chapterObj);
-      }
-
-      if (finalChapters.length === 0) {
-        return jsonResponseWithHeaders({ error: 'Video tidak tersedia.' }, 'ERR', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
-      }
+      // Merge
+      const finalChapters = liveChapterList.map(ch => ({
+          index: ch.index,
+          title: ch.name,
+          sources: videoMap[String(ch.id)] || (ch.mp4 ? [{q:480, url:ch.mp4}] : [])
+      }));
 
       const result = {
-        info: {
-          id: liveData.book?.bookId,
-          title: liveData.book?.bookName,
-          cover: liveData.book?.cover,
-          desc: liveData.book?.introduction,
-          tags: liveData.book?.tags || [],
-          author: liveData.book?.authorName || 'Dramabox',
-          views: liveData.book?.viewCount,
-          totalEps: finalChapters.length,
-          lang
-        },
-        chapters: finalChapters,
-        related: (liveData.recommends || []).map(b => ({ id: b.bookId, title: b.bookName, cover: b.cover, episodes: b.chapterCount }))
+          info: { 
+              id: webficJson.data?.book?.bookId, 
+              title: webficJson.data?.book?.bookName,
+              cover: webficJson.data?.book?.cover,
+              totalEps: finalChapters.length
+          },
+          chapters: finalChapters
       };
 
-      // Save to KV with timestamp
-      if (env.DRAMABOX_CACHE) {
-        try {
-          const payloadToStore = { ...result, _cachedAt: Date.now() };
-          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(payloadToStore), { expirationTtl: 1800 }));
-        } catch (e) {
-          console.log('KV put failed', e);
-        }
+      // Cache Save (Write)
+      if (env.DRAMABOX_CACHE && finalChapters.length > 0) {
+          context.waitUntil(env.DRAMABOX_CACHE.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 }));
       }
 
-      // Update session lastViewed and clear per-book bypass flag if present
-      if (session && session.data) {
-        session.data.lastViewed = { bookId, timestamp: Date.now() };
-        if (session.data.cacheBypass && session.data.cacheBypass[bookId]) {
-          delete session.data.cacheBypass[bookId];
-        }
-        await storeSession(env, session.id, session.data);
-      }
-
-      const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'X-Cache-Status': cacheStatus === 'FORCED' ? 'FORCED' : 'MISS' };
-      if (session.setCookie) headers['Set-Cookie'] = session.setCookie;
-      return new Response(JSON.stringify({ ...result, _source: 'SUCCESS' }), { headers });
+      return jsonResponseWithHeaders(result, 'MISS', session.setCookie ? { 'Set-Cookie': session.setCookie } : {});
     }
 
-    // default
-    return new Response('Invalid Request', { status: 400 });
+    return new Response('Bad Request', { status: 400 });
+
   } catch (err) {
-    console.log('Unhandled error in onRequest', err);
-    return new Response(JSON.stringify({ error: err?.message || String(err) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
 }
